@@ -1,0 +1,7 @@
+# folder
+datasets/
+
+# MacOS ignore
+.DS_Store
+
+# Windows ignore% 
