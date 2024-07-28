@@ -1,5 +1,7 @@
 # folder
 datasets/
+__pycache__/
+models/
 
 # MacOS ignore
 .DS_Store
