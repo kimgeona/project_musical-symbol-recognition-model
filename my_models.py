@@ -25,13 +25,13 @@ def layer_out(inputs, n, layer_name, pre_outputs=None, i=None):
     layer = tf.keras.layers.Dense(32, activation='relu')(layer)
 
     # 출력층
-    if (pre_outputs is not None) and (i is not None): 
+    if pre_outputs is not None and i is not None: 
         layer_out = tf.keras.layers.Dense(n, activation='softmax')(layer)
     else:
         layer_out = tf.keras.layers.Dense(n, activation='softmax', name=layer_name)(layer)
 
     # 마스크 처리
-    if (pre_outputs is not None) and (i is not None):
+    if pre_outputs is not None and i is not None:
         #mask = tf.gather(pre_outputs, i, axis=1)
         #mask = tf.expand_dims(mask, axis=1)
         mask = tf.keras.layers.Reshape((-1,))(pre_outputs[:, i])
@@ -39,7 +39,7 @@ def layer_out(inputs, n, layer_name, pre_outputs=None, i=None):
     
     return layer_out
 
-def msrm(t_dfs):
+def msrm(out_shape):
     # 모델 입력
     inputs = tf.keras.layers.Input(shape=(512, 192, 1))
 
@@ -70,22 +70,22 @@ def msrm(t_dfs):
     layer_all = tf.keras.layers.Flatten()(layer_1)
     layer_all = tf.keras.layers.Dense(256, activation='relu')(layer_all)
     layer_all = tf.keras.layers.Dense(128, activation='relu')(layer_all)
-    layer_all = tf.keras.layers.Dense(t_dfs[0].shape[-1], activation='sigmoid', name='all')(layer_all)
+    layer_all = tf.keras.layers.Dense(out_shape[0], activation='sigmoid', name='all')(layer_all)
 
     # 모델 출력 : 상세분류
-    layer_pitch         = layer_out(layer_2, t_dfs[1].shape[-1], 'pitch')
-    layer_note          = layer_out(layer_2, t_dfs[2].shape[-1], 'note', layer_all, 0)
-    layer_accidental    = layer_out(layer_2, t_dfs[3].shape[-1], 'accidental', layer_all, 1)
-    layer_articulation  = layer_out(layer_2, t_dfs[4].shape[-1], 'articulation', layer_all, 2)
-    layer_dynamic       = layer_out(layer_2, t_dfs[5].shape[-1], 'dynamic', layer_all, 3)
-    layer_octave        = layer_out(layer_2, t_dfs[6].shape[-1], 'octave', layer_all, 4)
-    layer_ornament      = layer_out(layer_2, t_dfs[7].shape[-1], 'ornament', layer_all, 5)
-    layer_repetition    = layer_out(layer_2, t_dfs[8].shape[-1], 'repetition', layer_all, 6)
-    layer_clef          = layer_out(layer_2, t_dfs[9].shape[-1], 'clef', layer_all, 7)
-    layer_key           = layer_out(layer_2, t_dfs[10].shape[-1], 'key', layer_all, 8)
-    layer_measure       = layer_out(layer_2, t_dfs[11].shape[-1], 'measure', layer_all, 9)
-    layer_rest          = layer_out(layer_2, t_dfs[12].shape[-1], 'rest', layer_all, 10)
-    layer_time          = layer_out(layer_2, t_dfs[13].shape[-1], 'time', layer_all, 11)
+    layer_pitch         = layer_out(layer_2, out_shape[1], 'pitch')
+    layer_note          = layer_out(layer_2, out_shape[2], 'note', layer_all, 0)
+    layer_accidental    = layer_out(layer_2, out_shape[3], 'accidental', layer_all, 1)
+    layer_articulation  = layer_out(layer_2, out_shape[4], 'articulation', layer_all, 2)
+    layer_dynamic       = layer_out(layer_2, out_shape[5], 'dynamic', layer_all, 3)
+    layer_octave        = layer_out(layer_2, out_shape[6], 'octave', layer_all, 4)
+    layer_ornament      = layer_out(layer_2, out_shape[7], 'ornament', layer_all, 5)
+    layer_repetition    = layer_out(layer_2, out_shape[8], 'repetition', layer_all, 6)
+    layer_clef          = layer_out(layer_2, out_shape[9], 'clef', layer_all, 7)
+    layer_key           = layer_out(layer_2, out_shape[10], 'key', layer_all, 8)
+    layer_measure       = layer_out(layer_2, out_shape[11], 'measure', layer_all, 9)
+    layer_rest          = layer_out(layer_2, out_shape[12], 'rest', layer_all, 10)
+    layer_time          = layer_out(layer_2, out_shape[13], 'time', layer_all, 11)
 
     # 모델 생성
     model = tf.keras.Model(inputs=[inputs], outputs=[
