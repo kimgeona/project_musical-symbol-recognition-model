@@ -49,19 +49,19 @@ def label_categorize(df):
             'rest',
             'time'
         ]),
-        pick(df, keywords=['staff-']).drop(columns=['staff-half-left', 'staff-half-right']),
-        pick(df, keywords=['note']),
-        pick(df, keywords=['accidental']),
-        pick(df, keywords=['articulation']),
-        pick(df, keywords=['dynamic']),
-        pick(df, keywords=['octave']),
-        pick(df, keywords=['ornament']),
-        pick(df, keywords=['repetition']),
-        pick(df, keywords=['clef']),
-        pick(df, keywords=['key']),
-        pick(df, keywords=['measure']),
-        pick(df, keywords=['rest']),
-        pick(df, keywords=['time']),
+        #pick(df, keywords=['staff-']).drop(columns=['staff-half-left', 'staff-half-right']),
+        #pick(df, keywords=['note']),
+        #pick(df, keywords=['accidental']),
+        #pick(df, keywords=['articulation']),
+        #pick(df, keywords=['dynamic']),
+        #pick(df, keywords=['octave']),
+        #pick(df, keywords=['ornament']),
+        #pick(df, keywords=['repetition']),
+        #pick(df, keywords=['clef']),
+        #pick(df, keywords=['key']),
+        #pick(df, keywords=['measure']),
+        #pick(df, keywords=['rest']),
+        #pick(df, keywords=['time']),
     ]
 
     # Pandas 데이터 프레임을 TensorFlow 텐서로 변환
@@ -79,7 +79,8 @@ def label_categorize(df):
         else    : print(', {}'.format(t.shape[-1]), end='')
     print(']')
     # 
-    return df_tensor
+    if len(df_tensor) == 1  : return df_tensor[0]
+    else                    : return df_tensor
 
 # 이미지 레이블 준비
 def prepare_label(csv_dir):

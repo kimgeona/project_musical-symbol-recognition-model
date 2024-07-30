@@ -19,7 +19,7 @@ def review_dataset(dataset, lable_class, num_images):
 @tf.function
 def load_image(image, label):
     image = tf.io.read_file(image)                  # 파일 로드
-    image = tf.image.decode_png(image, channels=1)  # png 파일로 변환
+    image = tf.image.decode_png(image, channels=3)  # png 파일로 변환
     image = tf.cast(image, tf.float32)              # uint8 -> float32
     image = image / 255.0                           # 0~1 로 정규화
     image = 1.0 - image                             # 흑백 이미지 반전
