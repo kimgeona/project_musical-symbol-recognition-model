@@ -71,13 +71,21 @@ def label_categorize(df):
     print('생성된 데이터셋 정보')
     print('--------------------------------')
     for i, t in enumerate(df_tensor):
-        print('out shape {:<3} : {}'.format(i, t.shape))
+        print('shape {:<3} : {}'.format(i, t.shape))
+    print('--------------------------------')
+    for i, t in enumerate(df_tensor):
+        print('count {:<3} : ['.format(i), end='')
+        for a, b in enumerate(tf.reduce_sum(t, axis=0).numpy()):
+            if a==0 : print('{}'.format(b), end='')
+            else    : print(', {}'.format(b), end='')
+        print(']')
     print('--------------------------------')
     print('[', end='')
     for i, t in enumerate(df_tensor):
         if i==0 : print('{}'.format(t.shape[-1]), end='')
         else    : print(', {}'.format(t.shape[-1]), end='')
     print(']')
+
     # 
     if len(df_tensor) == 1  : return df_tensor[0]
     else                    : return df_tensor
