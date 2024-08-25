@@ -107,3 +107,51 @@ def msrm(out_shape):
 
     # 모델 반환
     return model
+
+# 악상기호 인식 모델 클래스
+class MusicalSymbolModel:
+    # 모델 1 : 전체 분류
+    def model_1():
+        pass
+
+    # 모델 2 : 카테고리 분류
+    def model_2(self, input_shape=(512, 192, 1), output_units=12):
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # 첫 번째 합성곱 블록
+        layer_1 = tf.keras.layers.Conv2D(filters=32, kernel_size=32, strides=1, padding='same', activation='relu')(input)
+        layer_1 = tf.keras.layers.MaxPooling2D(pool_size=(2,2))(layer_1)
+        flatten_1 = tf.keras.layers.Flatten()(layer_1)
+        dense_1 = tf.keras.layers.Dense(32, activation='relu')(flatten_1)
+
+        # 두 번째 합성곱층 블록
+        layer_2 = tf.keras.layers.Conv2D(filters=64, kernel_size=16, strides=1, padding='same', activation='relu')(layer_1)
+        layer_2 = tf.keras.layers.MaxPooling2D(pool_size=(2,2))(layer_2)
+        flatten_2 = tf.keras.layers.Flatten()(layer_2)
+        dense_2 = tf.keras.layers.Dense(64, activation='relu')(flatten_2)
+
+        # 세 번째 합성곱층 블록
+        layer_3 = tf.keras.layers.Conv2D(filters=128, kernel_size=3, strides=1, padding='same', activation='relu')(layer_2)
+        layer_3 = tf.keras.layers.MaxPooling2D(pool_size=(2,2))(layer_3)
+        flatten_3 = tf.keras.layers.Flatten()(layer_3)
+        dense_3 = tf.keras.layers.Dense(128, activation='relu')(flatten_3)
+
+        # 각 출력들 연결
+        concatenate = tf.keras.layers.Concatenate()([dense_1, dense_2, dense_3])
+
+        # 드롭아웃
+        dropout = tf.keras.layers.Dropout(0.2)(concatenate)
+
+        # 출력층
+        output = tf.keras.layers.Dense(output_units, activation='sigmoid')(dropout)
+        
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2')
+
+        # 모델 반환
+        return model
+
+    # 모델 3 : 카테고리 분류, 상세 분류
+    def model_3():
+        pass

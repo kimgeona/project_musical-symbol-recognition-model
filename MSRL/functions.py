@@ -1,25 +1,12 @@
 # 필요한 패키지
 import tensorflow as tf             # 텐서플로
 import tensorflow_addons as tfa     # 텐서플로 애드온
-import matplotlib.pyplot as plt     # 그래프 도구
-
-# 데이터셋 미리 보기
-def review_dataset(dataset, lable_class, num_images):
-    plt.figure(figsize=(10, 10))
-    for images, labels in dataset.take(1):
-        for i in range(num_images):
-            ax = plt.subplot(4, 8, i + 1)
-            plt.imshow(images[i], cmap='gray')
-            print(i, ' : ', [name for name, mask in zip(lable_class, tf.gather(labels[0], i).numpy()) if mask==1])
-            plt.title(i)
-            plt.axis('off')
-    plt.show()
 
 # 이미지 불러오기
 @tf.function
 def load_image(image, label):
     image = tf.io.read_file(image)                  # 파일 로드
-    image = tf.image.decode_png(image, channels=3)  # png 파일로 변환
+    image = tf.image.decode_png(image, channels=1)  # png 파일로 변환
     image = tf.cast(image, tf.float32)              # uint8 -> float32
     image = image / 255.0                           # 0~1 로 정규화
     image = 1.0 - image                             # 흑백 이미지 반전
