@@ -5,6 +5,7 @@ import tensorflow as tf             # 텐서플로
 # 사용자 손실 함수
 class WeightedBinaryCrossentropy(tf.keras.losses.Loss):
     def __init__(self, numbers, alpha=1.0, **kwargs):
+        super(WeightedBinaryCrossentropy, self).__init__(**kwargs)
         # 전체 합
         total = sum(numbers)
         # 자신의 클래스가 차지하는 비중(비율) 구하기
@@ -14,8 +15,6 @@ class WeightedBinaryCrossentropy(tf.keras.losses.Loss):
         self.rate = tf.clip_by_value(self.rate, epsilon, 1.0-epsilon)
         # 비율이 작은것이 큰 가중치를 가지도록 로그함수 통과
         self.rate = 1.0 - tf.math.log(self.rate)
-        #
-        super().__init__(**kwargs)
 
     def call(self, y_true, y_pred):
         # 자료형 통일
