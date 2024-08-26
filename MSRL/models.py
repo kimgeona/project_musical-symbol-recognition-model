@@ -115,7 +115,11 @@ class MusicalSymbolModel:
         pass
 
     # 모델 2 : 카테고리 분류
-    def model_2(self, input_shape=(512, 192, 1), output_units=12):
+    def model_2_CNN(self, input_shape=(512, 192, 1), output_units=12):
+        """
+        악상기호의 대분류(카테고리 분류)를 위해 설계한 모델.
+        에포크를 많이 잡아서 학습을 하여도 정확도가 12%를 웃돌고 손실이 내려갈 기미가 안보여 콜백함수에 의해 중간에 학습이 멈춰짐.
+        """
         # 모델 입력
         input = tf.keras.layers.Input(shape=input_shape)
 
@@ -148,6 +152,62 @@ class MusicalSymbolModel:
         
         # 모델 생성
         model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2')
+
+        # 모델 반환
+        return model
+    
+    # 모델 2 : 카테고리 분류
+    def model_2_CRNN(self, input_shape=(512, 192, 1), num_classes=12):
+        """
+        악상기호들이 등장하는 패턴이 의존적인 규칙이 있고,
+        이러한 모습이 한글 문자 인식(조합된 문자 인식)과 비슷하다는 생각이 들어 알아보니 찾은 모델.
+
+        CNN 층으로 다양한 패턴을 학습하고, RNN 층으로 이 패턴들의 상관관계를 분석하는 것이 핵심.
+        RNN 층이 악상기호의 의존적으로 그려지는 패턴을 캐치할 것 같다는 생각을 하였고 이에 예제를 그대로 긁어다 GPT한테 부탁해서 만든 모델.
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (256, 96, 64)
+
+        # Conv2_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (128, 48, 128)
+
+        # Conv3_1 * Conv3_2 * MaxPooling
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (64, 24, 256)
+
+        # Conv4_1 * BatchNormalization
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)  # (64, 24, 512)
+
+        # Conv5_1 * BatchNormalization * MaxPooling
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (32, 12, 512)
+
+        # Conv6_1
+        x = tf.keras.layers.Conv2D(512, (2, 2), padding='same', activation='relu')(x)  # (32, 12, 512)
+        
+        # Reshape
+        x = tf.keras.layers.Reshape(target_shape=(32, 12 * 512))(x)  # (32, 512)
+
+        # Bidirectional LSTM * Bidirectional LSTM
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 512)
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 512)
+
+        # TimeDistributed(Dense) - Dense 레이어에서 각 타임 스텝마다 출력을 생성
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes, activation='sigmoid'))(x)  # (32, 12)
+
+        # GlobalAveragePooling1D를 사용해 시퀀스의 차원을 없애기
+        output = tf.keras.layers.GlobalAveragePooling1D()(x)  # (12)
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2_2')
 
         # 모델 반환
         return model
