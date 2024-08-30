@@ -151,7 +151,7 @@ class MusicalSymbolModel:
         output = tf.keras.layers.Dense(output_units, activation='sigmoid')(dropout)
         
         # 모델 생성
-        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2')
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2_CNN')
 
         # 모델 반환
         return model
@@ -194,11 +194,11 @@ class MusicalSymbolModel:
         x = tf.keras.layers.Conv2D(512, (2, 2), padding='same', activation='relu')(x)  # (32, 12, 512)
         
         # Reshape
-        x = tf.keras.layers.Reshape(target_shape=(32, 12 * 512))(x)  # (32, 512)
+        x = tf.keras.layers.Reshape(target_shape=(32, 12 * 512))(x)  # (32, 12 * 512)
 
         # Bidirectional LSTM * Bidirectional LSTM
-        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 512)
-        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 512)
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 256)
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))(x)  # (32, 256)
 
         # TimeDistributed(Dense) - Dense 레이어에서 각 타임 스텝마다 출력을 생성
         x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(num_classes, activation='sigmoid'))(x)  # (32, 12)
@@ -207,7 +207,70 @@ class MusicalSymbolModel:
         output = tf.keras.layers.GlobalAveragePooling1D()(x)  # (12)
 
         # 모델 생성
-        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2_2')
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2_CRNN')
+
+        # 모델 반환
+        return model
+    
+    # 모델 2 : 카테고리 분류
+    def model_2_CNN_MHA(self, input_shape=(512, 192, 1), num_classes=12):
+        """
+        model_2_CRNN 에서 특징들의 상관관계를 분석하는 RNN 층의 성능 효과를 보고,
+        연관관계 분석에 탁월한 성능을 보이는 Self-Attention을 이용하면 좋을 것 같다는 생각을 하게 됨.
+        다양한 연관관계를 찾을 수 있도록 어텐션을 Multi-Head로 구성하는 층을 이용함.
+        특히 특성맵 사이의 분석에 용이하도록 합성곱층의 출력 텐서의 차원을 재정렬함.
+
+        성능은 CRNN보다 매우 좋은 점수를 보여주고 있지만, 과적합이 조금 심하게 적용되고 있는 모습이 보여지고 있음.
+        validation 데이터셋을 지금보다 많이 준비를 하고 과대적합을 방지하는 코드를 구성하는게 좋을 것 으로 보임.
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (256, 96, 64)
+
+        # Conv2_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (128, 48, 128)
+
+        # Conv3_1 * Conv3_2 * MaxPooling
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (64, 24, 256)
+
+        # Conv4_1 * BatchNormalization
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)  # (64, 24, 512)
+
+        # Conv5_1 * BatchNormalization * MaxPooling
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (32, 12, 512)
+
+        # Conv6_1
+        x = tf.keras.layers.Conv2D(512, (2, 2), padding='same', activation='relu')(x)  # (32, 12, 512)
+        
+        # (중요)Permute(transpose)를 사용하여 특성맵끼리의 관계를 파악하기 위한 차원 재정렬
+        x = tf.keras.layers.Permute(dims=(3, 1, 2))(x) # (512, 32, 12)
+
+        # (중요)Reshape
+        x = tf.keras.layers.Reshape(target_shape=(512, 12 * 32))(x)  # (512, 12 * 32)
+
+        # Multi-Head Self-Attention
+        x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)
+
+        # dense1_1
+        x = tf.keras.layers.Dense(256, activation='relu')(x)
+
+        # GlobalAveragePooling1D를 사용해 시퀀스의 차원을 없애기
+        x = tf.keras.layers.GlobalAveragePooling1D()(x)
+
+        # dense2_1
+        output = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x)
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2_CNN_MHA')
 
         # 모델 반환
         return model
