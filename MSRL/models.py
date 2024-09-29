@@ -399,10 +399,15 @@ class MusicalSymbolModel:
         # Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
         x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                    # (256, 256)
         x_omc = tf.keras.layers.GlobalAveragePooling1D()(x_omc)                     # (256,)
-        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x)         # (num_classes,)
+        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_omc)     # (num_classes,)
+
+        # [Object Positioning] 출력값이 [Object Multiclass Classification] 출력값에 의해 제어
+        x_omc_expanded = tf.expand_dims(x_omc, axis=2)
+        x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))
+        x_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
 
         # 모델 생성
-        model = tf.keras.Model(inputs=[input], outputs=[x_op, x_omc], name='MSRM_ObjectDetection')
+        model = tf.keras.Model(inputs=[input], outputs=[x_combined, x_omc], name='MSRM_ObjectDetection')
 
         # 모델 반환
         return model
