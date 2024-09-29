@@ -22,24 +22,32 @@ def preview(dataset, lable_class, num_images):
 # 악상 기호 데이터셋 클래스
 class MusicalSymbolDataset:
     # 초기화
-    def __init__(self, dataset_dir=os.path.join('.', 'datasets', 'MusicalSymbol-v.1.1.5')):
-        # 데이터셋 주소 정보 생성
-        self.dataset_dir = dataset_dir                          # 데이터셋 주소
-        self.csv_dir = os.path.join(dataset_dir, 'label.csv')   # 데이터셋 레이블 주소
-        # 이미지 파일 목록 구하기
-        self.img_dirs = os.listdir(self.dataset_dir)
-        self.img_dirs = [file.split('.')[0] for file in self.img_dirs if file.split('.')[1] == 'png']
-        self.img_dirs = [int(file) for file in self.img_dirs]
-        self.img_dirs.sort()
-        self.img_dirs = [os.path.join(self.dataset_dir, str(file) + '.png') for file in self.img_dirs]
+    def __init__(self, dataset_dir=os.path.join('.', 'datasets', 'MSIG_1.1.5_note-recognition')):
+        # 데이터셋 주소 저장
+        self.dataset_dir = [
+            os.path.join(dataset_dir, 'train'),
+            os.path.join(dataset_dir, 'validation'),
+            os.path.join(dataset_dir, 'test')
+        ]
+        # 데이터셋 레이블 주소 저장
+        self.csv_dir = [
+            os.path.join(self.dataset_dir[0], 'label.csv'),
+            os.path.join(self.dataset_dir[1], 'label.csv'),
+            os.path.join(self.dataset_dir[2], 'label.csv')
+        ]
+        # 이미지 주소, 이미지 레이블
+        self.img_dirs = []
+        self.img_label = [pd.read_csv(dir) for dir in self.csv_dir]
         # 이미지 레이블 불러오기
-        self.img_label = pd.read_csv(self.csv_dir)                                              # CSV 파일 불러오기
-        self.img_label['name_int'] = self.img_label['name'].str.extract('(\d+)').astype(int)    # name 열을 정수값으로 추출
-        self.img_label = self.img_label.sort_values('name_int')                                 # 정수값을 기준으로 정렬
-        self.img_label.reset_index(drop=True, inplace=True)                                     # 현재 데이터 순서로 인덱스 초기화
-        self.img_label = self.img_label.drop(columns=['name', 'name_int'])                      # 필요 없는 name, name_int 열 제거
-        # 이미지 레이블 클래스 변수
-        self.label_classes = []
+        for i in range(len(self.dataset_dir)):
+            self.img_label[i]['name_int'] = self.img_label[i]['name'].str.extract('(\d+)').astype(int)  # CSV 파일 불러오기
+            self.img_label[i] = self.img_label[i].sort_values('name_int')                               # name 열을 정수값으로 추출
+            self.img_label[i].reset_index(drop=True, inplace=True)                                      # 정수값을 기준으로 정렬
+            self.img_dirs.append(self.img_label[i]['name'].to_list())                                   # 현재 데이터 순서로 인덱스 초기화
+            self.img_label[i] = self.img_label[i].drop(columns=['name', 'name_int'])                    # 필요 없는 name, name_int 열 제거
+        # 이미지 주소 생성
+        for i in range(len(self.dataset_dir)):
+            self.img_dirs[i] = [os.path.join(self.dataset_dir[i], name) for name in self.img_dirs[i]]
 
     # 데이터 프레임 추출
     def __pick(self, dataframe, keywords):
@@ -48,7 +56,7 @@ class MusicalSymbolDataset:
         # 데이터 프레임 구성
         for word in keywords:
             # Dataframe 에서 kewords 단어를 포함하는 열 이름 추출
-            cols = [col for col in dataframe.columns.to_numpy() if word in col]
+            cols = [col for col in dataframe.columns if word in col]
             # keywords 단어들을 중심으로 열들 하나로 묶어 Dataframe에 저장
             if (len(keywords) > 1):
                 for col in cols:
@@ -56,47 +64,63 @@ class MusicalSymbolDataset:
                     else:           df[word.strip()] = dataframe[col]
             # keywords 단어가 들어간 열들만 Dataframe 으로 만들기
             else:
-                for col in cols:
-                    df[col.strip()] = dataframe[col]
-        # 레이블 클래스 저장
-        self.label_classes = self.label_classes + df.columns.to_numpy().tolist()
+                if cols:
+                    df = dataframe[cols].copy()
+                    df.columns = [col.strip() for col in cols]
         # 생성된 데이터 프레임 반환
         return df
 
     # 데이터셋 생성
     def __make(self):
-        # 개별 데이터셋 생성
-        if len(self.img_dirs_edited) > 1:   ds_img = tf.data.Dataset.from_tensor_slices(self.img_dirs_edited)
-        else:                               ds_img = tf.data.Dataset.from_tensor_slices(self.img_dirs_edited[0])
-        if len(self.img_label_edited) > 1:  ds_label = tf.data.Dataset.from_tensor_slices(self.img_label_edited)
-        else:                               ds_label = tf.data.Dataset.from_tensor_slices(self.img_label_edited[0])
+        # 이미지 주소 데이터셋 생성
+        ds_img = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_dirs_edited]
 
+        # 이미지 레이블 데이터셋 생성
+        ds_label = [(tf.data.Dataset.from_tensor_slices(t[0]), tf.data.Dataset.from_tensor_slices(t[1])) for t in self.img_label_edited]
+        
         # 하나의 데이터셋 생성
-        ds = tf.data.Dataset.zip((ds_img, ds_label))
+        dss = []
+        for i, l in zip(ds_img, ds_label):
+            dss.append(tf.data.Dataset.zip((i, l)))
 
         # map : 전처리 적용
-        ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 이미지 불러오기
-        ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 이동
-        ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)    # 이미지 회전
-        ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 확대 및 축소
-        ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 진동
-        ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)       # 이미지 잡음
+        for i, ds in enumerate(dss):
+            # 마지막 데이터셋은 전처리 건너뛰기
+            if i==len(dss)-1: 
+                continue
+            # 전처리
+            ds = ds.map(myfn.dimension_reduction, num_parallel_calls=tf.data.experimental.AUTOTUNE) # 차원 축소
+            ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+            ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+            ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)        # 이미지 회전
+            ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+            ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
+            ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
 
         # cache
-        ds = ds.cache() # 캐싱
+        for ds in dss:
+            ds = ds.cache() # 캐싱
 
         # shuffle
-        ds = ds.shuffle(buffer_size=len(self.img_dirs))  # 셔플
+        for i, ds in enumerate(dss):
+            ds = ds.shuffle(buffer_size=len(self.img_dirs[i]))  # 셔플
+
+        # batch
+        for ds in dss:
+            ds = ds.batch(32)
+
+        # prefetch
+        for ds in dss:
+            ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
 
         # 생성된 데이터셋 저장
-        self.tfds = ds
-
-        # 훈련, 검증 데이터셋 저장
-        self.tfds_validation = ds.take(320).batch(32).prefetch(tf.data.experimental.AUTOTUNE)  # 훈련 데이터셋
-        self.tfds_train = ds.skip(320).batch(32)                                               # 검증 데이터셋
+        if (len(ds)==1):
+            self.tfds = dss[0]
+        else:
+            self.tfds = dss
 
         # 생성된 데이터셋 정보 출력
-        self.ds_info()
+        #self.ds_info()
 
     # 데이터셋 레이블 정보 출력
     def ds_info(self):
@@ -229,3 +253,41 @@ class MusicalSymbolDataset:
             return self.tfds_train, self.tfds_validation
         else:
             return self.tfds
+
+    # 데이터셋 4 : 카테고리 분류 for Object Detection
+    def ds_OD(self):
+        # 이미지 레이블 클래스 변수 초기화
+        self.label_classes = [
+            'staff', 
+            'note', 
+            'accidental',
+            'articulation',
+            'dynamic',
+            'glissando',
+            'octave',
+            'ornament',
+            'repetition',
+            'tie'
+        ]
+
+        # 데이터 프레임 추출
+        df_list = []
+        for i in range(len(self.dataset_dir)):
+            picked_dfs = [self.__pick(self.img_label[i], keywords=[name]) for name in self.label_classes]
+            picked_dfs = [self.__pick(df, keywords=['-x-1', '-y-1', '-x-2', '-y-2', '-cx', '-cy', '-probability']) for df in picked_dfs]
+            for i, df in enumerate(picked_dfs):
+                df.columns = [self.label_classes[i]+col for col in df.columns]
+            picked_dfs = pd.concat(picked_dfs, axis=1)
+            regression = [col for col in picked_dfs.columns.to_list() if not col.endswith('-probability')]
+            classification = [col for col in picked_dfs.columns.to_list() if col.endswith('-probability')]
+            df_list.append((picked_dfs[regression], picked_dfs[classification]))
+        
+        # 이미지와 레이블 준비
+        self.img_dirs_edited = [tuple([tf.convert_to_tensor(img_dir, dtype=tf.string)]) for img_dir in self.img_dirs]
+        self.img_label_edited = [(tuple([tf.convert_to_tensor(df[0].values, dtype=tf.int16)]), tuple([tf.convert_to_tensor(df[1].values, dtype=tf.int16)])) for df in df_list]
+
+        # 데이터셋 생성
+        self.__make()
+
+        # 데이터셋 반환
+        return self.tfds

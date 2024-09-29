@@ -110,11 +110,17 @@ def msrm(out_shape):
 
 # 악상기호 인식 모델 클래스
 class MusicalSymbolModel:
-    # 모델 1 : 전체 분류
-    def model_1():
-        pass
+    """
+    악상기호 인식 모델을 만들어서 반환해주는 클래스
 
-    # 모델 2 : 카테고리 분류
+    모델 1 : 전체 분류 모델
+    모델 2 : 악상기호 대분류 모델
+    모델 3 : 악상기호 대분류 + 상세분류 모델
+    모델 4 : 악상기호 대분류 모델 for YOLO
+    """
+    #
+
+    # 모델 2 : CNN
     def model_2_CNN(self, input_shape=(512, 192, 1), output_units=12):
         """
         악상기호의 대분류(카테고리 분류)를 위해 설계한 모델.
@@ -156,7 +162,7 @@ class MusicalSymbolModel:
         # 모델 반환
         return model
     
-    # 모델 2 : 카테고리 분류
+    # 모델 2 : CNN + RNN
     def model_2_CRNN(self, input_shape=(512, 192, 1), num_classes=12):
         """
         악상기호들이 등장하는 패턴이 의존적인 규칙이 있고,
@@ -212,7 +218,7 @@ class MusicalSymbolModel:
         # 모델 반환
         return model
     
-    # 모델 2 : 카테고리 분류
+    # 모델 2 : CNN + MHSA
     def model_2_CNN_MHA(self, input_shape=(512, 192, 1), num_classes=12):
         """
         model_2_CRNN 에서 특징들의 상관관계를 분석하는 RNN 층의 성능 효과를 보고,
@@ -275,6 +281,128 @@ class MusicalSymbolModel:
         # 모델 반환
         return model
 
-    # 모델 3 : 카테고리 분류, 상세 분류
-    def model_3():
-        pass
+    # 모델 2
+    def model_2(self, input_shape=(512, 192, 1), num_classes=12):
+        """
+        실제로 사용할 모델
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling2D * Conv1_2 * MaxPooling2D * BatchNormalization
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)    # (512, 192, 64)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (256, 96, 64)
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)       # (256, 96, 128)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (128, 48, 128)
+        x = tf.keras.layers.BatchNormalization()(x)                                         
+
+        # inception
+        x1 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x2 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x2 = tf.keras.layers.Conv2D(128, 3, padding='same', activation='relu')(x2)
+        x3 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x3 = tf.keras.layers.Conv2D(128, 5, padding='same', activation='relu')(x3)
+        x4 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x4 = tf.keras.layers.Conv2D(128, 7, padding='same', activation='relu')(x4)
+        x5 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x5 = tf.keras.layers.Conv2D(128, 9, padding='same', activation='relu')(x5)
+        x6 = tf.keras.layers.MaxPooling2D(pool_size=3, strides=1, padding='same')(x)
+        x6 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x6)
+        x = tf.keras.layers.Concatenate(axis=-1)([x1, x2, x3, x4, x5, x6])                  # (128, 48, 640)
+        x = tf.keras.layers.MaxPooling2D(pool_size=2)(x)                                    # (64, 24, 640)                               
+
+        # Conv2_1 * Conv2_2 * BatchNormalization * MaxPooling2D
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
+        x = tf.keras.layers.BatchNormalization()(x) 
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (32, 12, 256)
+
+        # Permute * Reshape * Multi-Head-Self-Attention
+        x = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                                              # (256, 32, 12)
+        x = tf.keras.layers.Reshape(target_shape=(256, 32 * 12))(x)                                 # (256, 32 * 12)
+        x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)    # (256, 32 * 12)
+        #x = tf.keras.layers.Reshape(target_shape=(256, 32, 12))(x)                                  # (256, 32, 12)
+        #x = tf.keras.layers.Permute(dims=(2, 3, 1))(x)                                              # (256, 32, 12)
+
+        # dense1_1
+        x = tf.keras.layers.Dense(256, activation='relu')(x)                    # (256, 256)
+
+        # GlobalAveragePooling1D를 사용해 시퀀스의 차원을 없애기
+        x = tf.keras.layers.GlobalAveragePooling1D()(x)                         # (256,)
+
+        # dense2_1
+        output = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x)    # (12,)
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MusicalSymbolRecognitionModel_2')
+
+        # 모델 반환
+        return model
+
+    # 모델 4 : Object Detection with CNN + MHSA
+    def model_OD(self, input_shape=(512, 192, 1), num_classes=10):
+        """
+        기존의 합성곱층과 멀티 헤드 셀프 어텐션 층을 이용한 다중 분류 모델 구조에서,
+        YOLO모델의 객체 위치 추정 방식을 결합하여 Object Detection 모델을 새로 개발함.
+
+        악상 기호 이미지들의 크기와 비율 그리고 악보의 크기들이 보통 비슷한 점을 착안하여 이미지의 
+        크기를 다르게 입력받는 YOLO모델과는 다르게 기존의 방식 그대로 고정 크기로 잘라 입력받아
+        객체를 탐지하는 방향으로 설계하기로 함.
+
+        객체(악상기호)에 대한 위치 추정은 공간적 특징을 잘 잡아낼 수 있도록 Dense 층을 사용하지 않았고, 
+        해당 객체(악상기호)의 존재 여부, 즉 다중 분류는 합성곱, 멀티 헤드 셀프 어텐션, 완전 연결 층을 이용하도록 설계함.
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling2D * Conv1_2 * MaxPooling2D * BatchNormalization
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)    # (512, 192, 64)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (256, 96, 64)
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)       # (256, 96, 128)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (128, 48, 128)
+        x = tf.keras.layers.BatchNormalization()(x)                                         
+
+        # inception
+        x1 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x2 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x2 = tf.keras.layers.Conv2D(128, 3, padding='same', activation='relu')(x2)
+        x3 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x3 = tf.keras.layers.Conv2D(128, 5, padding='same', activation='relu')(x3)
+        x4 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x4 = tf.keras.layers.Conv2D(128, 7, padding='same', activation='relu')(x4)
+        x5 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
+        x5 = tf.keras.layers.Conv2D(128, 9, padding='same', activation='relu')(x5)
+        x6 = tf.keras.layers.MaxPooling2D(pool_size=3, strides=1, padding='same')(x)
+        x6 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x6)
+        x = tf.keras.layers.Concatenate(axis=-1)([x1, x2, x3, x4, x5, x6])                  # (128, 48, 640)
+        x = tf.keras.layers.MaxPooling2D(pool_size=2)(x)                                    # (64, 24, 640)                               
+
+        # Conv2_1 * Conv2_2 * BatchNormalization * MaxPooling2D
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
+        x = tf.keras.layers.BatchNormalization()(x) 
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (32, 12, 256)
+
+        # Permute * Reshape * Multi-Head-Self-Attention * Reshape * Permute
+        x = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                                              # (256, 32, 12)
+        x = tf.keras.layers.Reshape(target_shape=(256, 32 * 12))(x)                                 # (256, 32 * 12)
+        x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)    # (256, 32 * 12)
+
+        # Object Positioning : Reshape * Permute
+        x_op = tf.keras.layers.Reshape(target_shape=(256, 32, 12))(x)                               # (256, 32, 12)
+        x_op = tf.keras.layers.Permute(dims=(2, 3, 1))(x_op)                                        # (32, 12, 256)
+
+        # Object Positioning : Conv3_1 * GlobalAveragePooling2D
+        x_op = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same', activation=None)(x_op)    # (32, 12, num_classes * 6)
+        x_op = tf.keras.layers.GlobalAveragePooling2D()(x_op)                                       # (1, num_classes * 6)
+
+        # Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
+        x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                    # (256, 256)
+        x_omc = tf.keras.layers.GlobalAveragePooling1D()(x_omc)                     # (256,)
+        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x)         # (num_classes,)
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[x_op, x_omc], name='MSRM_ObjectDetection')
+
+        # 모델 반환
+        return model
