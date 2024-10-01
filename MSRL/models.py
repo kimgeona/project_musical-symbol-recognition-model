@@ -404,10 +404,10 @@ class MusicalSymbolModel:
         # [Object Positioning] 출력값이 [Object Multiclass Classification] 출력값에 의해 제어
         x_omc_expanded = tf.expand_dims(x_omc, axis=2)
         x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))
-        x_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
+        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
 
         # 모델 생성
-        model = tf.keras.Model(inputs=[input], outputs=[x_combined, x_omc], name='MSRM_ObjectDetection')
+        model = tf.keras.Model(inputs=[input], outputs=[x_op_combined, x_omc], name='MSRM_ObjectDetection')
 
         # 모델 반환
         return model
