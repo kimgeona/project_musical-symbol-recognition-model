@@ -120,36 +120,27 @@ class MusicalSymbolDataset:
             self.tfds = dss
 
         # 생성된 데이터셋 정보 출력
-        #self.ds_info()
+        self.ds_info()
 
     # 데이터셋 레이블 정보 출력
     def ds_info(self):
-        print('-- TFDS label shape ------------------')
-        for i, t in enumerate(self.img_label_edited):
-            print('ds {:<2} : {}'.format(i, t.shape))
-        print()
-        print('-- TFDS label class count ------------------')
-        for i, t in enumerate(self.img_label_edited):
-            print('ds {:<2} : ['.format(i), end='')
-            for a, b in enumerate(tf.reduce_sum(t, axis=0).numpy()):
-                if a==0 : print('{}'.format(b), end='')
-                else    : print(', {}'.format(b), end='')
-            print(']')
-        print()
-        print('-- MODEL input node ------------------')
-        model_in = []
-        for i, t in enumerate(self.img_dirs_edited):
-            if isinstance(self.tfds.element_spec[0], tuple):
-                model_in.append(list(t.shape) + list(self.tfds.element_spec[0][i].shape))
-            else:
-                model_in.append(list(t.shape) + list(self.tfds.element_spec[0].shape))
-        print(model_in)
-        print()
-        print('-- MODEL output node ------------------')
-        model_out = []
-        for t in self.img_label_edited:
-            model_out.append([t.shape[-1]])
-        print(model_out)
+        for ts_index, name in enumerate(['Train', 'Validation', 'Test']):
+            print('-- TFDS {} ------------------'.format(name))
+            # input
+            for i, t in enumerate(self.img_dirs_edited[ts_index]):
+                print('input  {:<2} : {}, {}'.format(i, t.shape, t.dtype))
+            # output
+            for i, t in enumerate(self.img_label_edited[ts_index]):
+                print('output {:<2} : {}, {}'.format(i, t[0].shape, t[0].dtype))
+            print('---------------------------------')
+            # class info
+            batch_size = self.img_label_edited[ts_index][1][0].shape[0]
+            class_count = tf.reshape(self.img_label_edited[ts_index][1], shape=(batch_size, -1))
+            class_count = tf.reduce_sum(class_count, axis=0)
+            class_count = class_count.numpy().tolist()
+            print('total number of labels : {}'.format(batch_size))
+            print('number of each class : {}'.format(class_count))
+            print()
 
     # 데이터셋 1 : 전체 분류
     def ds_1(self, *, train_valid=True):
