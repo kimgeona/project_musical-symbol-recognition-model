@@ -81,22 +81,9 @@ class WeightedIoU(tf.keras.losses.Loss):
 
         # 바운딩 박스 좌표와 상대적 중심 좌표 분리
         box_true = y_true[:, :, 0:4]
-        box_pred = y_pred[:, :, 0:4]
-        point_true = y_true[:, :, 4:6]
-        point_pred = y_pred[:, :, 4:6]
-
-        # CIoU = IoU + 중심점 거리 + 종횡비 + 좌표 뒤바낌 패널티
-        iou = self.compute_IoU(box_true, box_pred)          # 0~1 : IoU 계산
-        distance = self.center_distance(box_true, box_pred) # 0~1 : 중심점 거리 계산
-        ratio = self.ratio_differences(box_true, box_pred)  # 0~1 : 박스 비율 차이 계산
-        penalty = self.coordinate_penalty(box_pred)         # 0~n :좌표 뒤바뀜 패널티
-
-        # 중심 좌표 손실
-        center_loss = self.box_diagonal(tf.concat([point_true, point_pred], axis=-1)) / self.box_diagonal(box_true)
         
         # 손실 계산
-        # : (batch_size, class_count, 1)
-        loss = iou + distance + ratio + penalty + center_loss
+        loss = tf.where(self.box_area(box_true)==0, self.to_zero_loss(y_pred), self.iou_loss(y_true, y_pred))
 
         # 소수 레이블에 더 많은 가중치를 부여
         # : (batch_size, class_count, 1)
@@ -143,6 +130,10 @@ class WeightedIoU(tf.keras.losses.Loss):
         # 예측 박스 좌표 정렬
         box2 = self.sort_coordinate(box2)
 
+        # box 넓이 계싼
+        box1_area = self.box_area(box1)
+        box2_area = self.box_area(box2)
+
         # 교집합 영역의 박스 좌표 구함
         box3 = tf.concat([
             tf.maximum(box1[:, :, 0:1], box2[:, :, 0:1]),
@@ -155,7 +146,7 @@ class WeightedIoU(tf.keras.losses.Loss):
         intersection_area = self.box_area(box3)
 
         # 합집합 영역 계산
-        union_area = self.box_area(box1) + self.box_area(box2) - intersection_area
+        union_area = box1_area + box2_area - intersection_area
 
         # 0~1 사이값 리턴
         return 1.0 - (intersection_area / union_area)
@@ -242,3 +233,34 @@ class WeightedIoU(tf.keras.losses.Loss):
 
         # 0~1 사이값 리턴
         return penalty_x + penalty_y
+
+    # 5-1. IoU 손실 구하기
+    def iou_loss(self, y_true, y_pred):
+        # 바운딩 박스 좌표와 상대적 중심 좌표 분리
+        box_true = y_true[:, :, 0:4]
+        box_pred = y_pred[:, :, 0:4]
+        point_true = y_true[:, :, 4:6]
+        point_pred = y_pred[:, :, 4:6]
+
+        # CIoU = IoU + 중심점 거리 + 종횡비 + 좌표 뒤바낌 패널티
+        iou = self.compute_IoU(box_true, box_pred)          # 0~1 : IoU 계산
+        distance = self.center_distance(box_true, box_pred) # 0~1 : 중심점 거리 계산
+        ratio = self.ratio_differences(box_true, box_pred)  # 0~1 : 박스 비율 차이 계산
+        penalty = self.coordinate_penalty(box_pred)         # 0~n :좌표 뒤바뀜 패널티
+
+        # 중심 좌표 손실
+        center_loss = self.box_diagonal(tf.concat([point_true, point_pred], axis=-1)) / self.box_diagonal(box_true)
+        
+        # 손실 계산
+        return iou + distance + ratio + penalty + center_loss
+
+    # 5-2. 0으로 수렴 손실 구하기
+    def to_zero_loss(self, y_pred):
+        # 모든 좌표 절대값 취하기
+        y_pred = tf.abs(y_pred)
+
+        # 로그 손실 구하기
+        loss = tf.math.log(y_pred + 1.0)
+
+        # 손실 합 반환
+        return tf.reduce_sum(loss, axis=-1, keepdims=True)
