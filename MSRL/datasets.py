@@ -274,8 +274,13 @@ class MusicalSymbolDataset:
             df_list.append((picked_dfs[regression], picked_dfs[classification]))
         
         # 이미지와 레이블 준비
-        self.img_dirs_edited = [tuple([tf.convert_to_tensor(img_dir, dtype=tf.string)]) for img_dir in self.img_dirs]
-        self.img_label_edited = [(tuple([tf.convert_to_tensor(df[0].values, dtype=tf.int16)]), tuple([tf.convert_to_tensor(df[1].values, dtype=tf.int16)])) for df in df_list]
+        self.img_dirs_edited = [
+            tuple([tf.convert_to_tensor(img_dir, dtype=tf.string)]) for img_dir in self.img_dirs
+        ]
+        self.img_label_edited = [
+            (tuple([tf.convert_to_tensor(df[0].values, dtype=tf.int16)]), 
+             tuple([tf.convert_to_tensor(df[1].values, dtype=tf.int16)])) for df in df_list
+        ]
 
         # 데이터셋 생성
         self.__make()
