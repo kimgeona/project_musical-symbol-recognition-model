@@ -5,7 +5,7 @@ import tensorflow_addons as tfa     # 텐서플로 애드온
 # 차원 축소
 @tf.function
 def dimension_reduction(image, label):
-    return image[0], label
+    return image, label
 
 # 이미지 불러오기
 @tf.function

@@ -375,7 +375,7 @@ class MusicalSymbolModel:
         x6 = tf.keras.layers.MaxPooling2D(pool_size=3, strides=1, padding='same')(x)
         x6 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x6)
         x = tf.keras.layers.Concatenate(axis=-1)([x1, x2, x3, x4, x5, x6])                  # (128, 48, 640)
-        x = tf.keras.layers.MaxPooling2D(pool_size=2)(x)                                    # (64, 24, 640)                               
+        x = tf.keras.layers.MaxPooling2D(pool_size=2)(x)                                    # (64, 24, 640)                            
 
         # Conv2_1 * Conv2_2 * BatchNormalization * MaxPooling2D
         x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
@@ -383,7 +383,7 @@ class MusicalSymbolModel:
         x = tf.keras.layers.BatchNormalization()(x) 
         x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (32, 12, 256)
 
-        # Permute * Reshape * Multi-Head-Self-Attention * Reshape * Permute
+        # Permute * Reshape * Multi-Head-Self-Attention
         x = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                                              # (256, 32, 12)
         x = tf.keras.layers.Reshape(target_shape=(256, 32 * 12))(x)                                 # (256, 32 * 12)
         x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)    # (256, 32 * 12)
@@ -399,12 +399,12 @@ class MusicalSymbolModel:
         # Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
         x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                    # (256, 256)
         x_omc = tf.keras.layers.GlobalAveragePooling1D()(x_omc)                     # (256,)
-        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_omc)     # (num_classes,)
+        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid', name='out2')(x_omc)     # (num_classes,)
 
         # [Object Positioning] 출력값이 [Object Multiclass Classification] 출력값에 의해 제어
         x_omc_expanded = tf.expand_dims(x_omc, axis=2)
         x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))
-        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
+        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6), name='out1')
 
         # 모델 생성
         model = tf.keras.Model(inputs=[input], outputs=[x_op_combined, x_omc], name='MSRM_ObjectDetection')

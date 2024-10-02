@@ -80,8 +80,8 @@ class MusicalSymbolDataset:
         
         # 하나의 데이터셋 생성
         dss = []
-        for i, l in zip(ds_img, ds_label):
-            dss.append(tf.data.Dataset.zip((i, l)))
+        for z in zip(ds_img, ds_label):
+            dss.append(tf.data.Dataset.zip(z))
 
         # map : 전처리 적용
         for i, ds in enumerate(dss):
@@ -89,29 +89,34 @@ class MusicalSymbolDataset:
             if i==len(dss)-1: 
                 continue
             # 전처리
-            ds = ds.map(myfn.dimension_reduction, num_parallel_calls=tf.data.experimental.AUTOTUNE) # 차원 축소
             ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
             ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
             ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)        # 이미지 회전
             ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
             ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
             ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
+            # 전처리된 데이터셋 저장
+            dss[i] = ds
 
         # cache
-        for ds in dss:
+        for i, ds in enumerate(dss):
             ds = ds.cache() # 캐싱
+            dss[i] = ds
 
         # shuffle
         for i, ds in enumerate(dss):
             ds = ds.shuffle(buffer_size=len(self.img_dirs[i]))  # 셔플
+            dss[i] = ds
 
         # batch
-        for ds in dss:
+        for i, ds in enumerate(dss):
             ds = ds.batch(32)
+            dss[i] = ds
 
         # prefetch
-        for ds in dss:
+        for i, ds in enumerate(dss):
             ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+            dss[i] = ds
 
         # 생성된 데이터셋 저장
         if (len(ds)==1):
@@ -127,16 +132,14 @@ class MusicalSymbolDataset:
         for ts_index, name in enumerate(['Train', 'Validation', 'Test']):
             print('-- TFDS {} ------------------'.format(name))
             # input
-            for i, t in enumerate(self.img_dirs_edited[ts_index]):
-                print('input  {:<2} : {}, {}'.format(i, t.shape, t.dtype))
+            print('input  0 : {}, {}'.format(self.img_dirs_edited[ts_index].shape, self.img_dirs_edited[ts_index].dtype))
             # output
             for i, t in enumerate(self.img_label_edited[ts_index]):
-                print('output {:<2} : {}, {}'.format(i, t[0].shape, t[0].dtype))
+                print('output {:<2} : {}, {}'.format(i, t.shape, t.dtype))
             print('---------------------------------')
             # class info
-            batch_size = self.img_label_edited[ts_index][1][0].shape[0]
-            class_count = tf.reshape(self.img_label_edited[ts_index][1], shape=(batch_size, -1))
-            class_count = tf.reduce_sum(class_count, axis=0)
+            batch_size = self.img_label_edited[ts_index][1].shape[0]
+            class_count = tf.reduce_sum(self.img_label_edited[ts_index][1], axis=0)
             class_count = class_count.numpy().tolist()
             print('total number of labels : {}'.format(batch_size))
             print('number of each class : {}'.format(class_count))
@@ -275,11 +278,10 @@ class MusicalSymbolDataset:
         
         # 이미지와 레이블 준비
         self.img_dirs_edited = [
-            tuple([tf.convert_to_tensor(img_dir, dtype=tf.string)]) for img_dir in self.img_dirs
+            tf.convert_to_tensor(img_dir, dtype=tf.string) for img_dir in self.img_dirs
         ]
         self.img_label_edited = [
-            (tuple([tf.convert_to_tensor(df[0].values, dtype=tf.int16)]), 
-             tuple([tf.convert_to_tensor(df[1].values, dtype=tf.int16)])) for df in df_list
+            [tf.convert_to_tensor(df[0].values, dtype=tf.int16), tf.convert_to_tensor(df[1].values, dtype=tf.int16)] for df in df_list
         ]
 
         # 데이터셋 생성

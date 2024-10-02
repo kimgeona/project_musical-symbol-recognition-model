@@ -90,21 +90,20 @@ class IoU(tf.keras.metrics.Metric):
         # 자료형 통일
         y_true = tf.cast(y_true, dtype=y_pred.dtype)
     
+        # 배치 크기 알아내기
+        batch_size = tf.shape(y_true)[0]
+
+        # shape 변경
+        y_true = tf.reshape(y_true, shape=(batch_size, -1, 6))
+        y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 6))
+
         # 바운딩 박스 좌표만 슬라이싱
         bounding_true = y_true[:, :, 0:4]
         bounding_pred = y_pred[:, :, 0:4]
 
-        # 애초에 크기가 없는 박스 필터링
-        bounding_true = tf.boolean_mask(bounding_true, self.box_area(bounding_true) > 0)
-        bounding_pred = tf.boolean_mask(bounding_pred, self.box_area(bounding_true) > 0) # bounding_true를 기준으로 필터링
-
-        # 텐서가 비어있는지 확인
-        if tf.size(bounding_true)==0:
-            return
-
         # IoU값 계산
-        iou_nums = tf.shape(bounding_true)[0]
-        iou = self.compute_IoU(bounding_true, bounding_pred)
+        iou_nums = tf.reduce_sum(tf.cast(tf.reduce_any(bounding_true != 0, axis=-1), dtype=tf.int16))
+        iou = tf.where(self.box_area(bounding_true)==0.0, 0.0, self.compute_IoU(bounding_true, bounding_pred))
 
         # 확인 결과 저장(누적)
         self.total.assign_add(tf.cast(tf.reduce_sum(iou), dtype=tf.float32))
