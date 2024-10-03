@@ -76,7 +76,7 @@ class MusicalSymbolDataset:
         ds_img = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_dirs_edited]
 
         # 이미지 레이블 데이터셋 생성
-        ds_label = [(tf.data.Dataset.from_tensor_slices(t[0]), tf.data.Dataset.from_tensor_slices(t[1])) for t in self.img_label_edited]
+        ds_label = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_label_edited]
         
         # 하나의 데이터셋 생성
         dss = []
@@ -129,17 +129,17 @@ class MusicalSymbolDataset:
 
     # 데이터셋 레이블 정보 출력
     def ds_info(self):
-        for ts_index, name in enumerate(['Train', 'Validation', 'Test']):
+        for i, name in enumerate(['Train', 'Validation', 'Test']):
             print('-- TFDS {} ------------------'.format(name))
             # input
-            print('input  0 : {}, {}'.format(self.img_dirs_edited[ts_index].shape, self.img_dirs_edited[ts_index].dtype))
+            print('input  : {}, {}'.format(self.img_dirs_edited[i].shape, self.img_dirs_edited[i].dtype))
             # output
-            for i, t in enumerate(self.img_label_edited[ts_index]):
-                print('output {:<2} : {}, {}'.format(i, t.shape, t.dtype))
+            print('output : {}, {}'.format(self.img_label_edited[i].shape, self.img_label_edited[i].dtype))
             print('---------------------------------')
             # class info
-            batch_size = self.img_label_edited[ts_index][1].shape[0]
-            class_count = tf.reduce_sum(self.img_label_edited[ts_index][1], axis=0)
+            batch_size = self.img_label_edited[i].shape[0]
+            tmp_tensor = tf.reshape(self.img_label_edited[i], shape=(batch_size, -1, 7))[:, :, 6]
+            class_count = tf.reduce_sum(tmp_tensor, axis=0)
             class_count = class_count.numpy().tolist()
             print('total number of labels : {}'.format(batch_size))
             print('number of each class : {}'.format(class_count))
@@ -272,16 +272,14 @@ class MusicalSymbolDataset:
             for i, df in enumerate(picked_dfs):
                 df.columns = [self.label_classes[i]+col for col in df.columns]
             picked_dfs = pd.concat(picked_dfs, axis=1)
-            regression = [col for col in picked_dfs.columns.to_list() if not col.endswith('-probability')]
-            classification = [col for col in picked_dfs.columns.to_list() if col.endswith('-probability')]
-            df_list.append((picked_dfs[regression], picked_dfs[classification]))
+            df_list.append(picked_dfs)
         
         # 이미지와 레이블 준비
         self.img_dirs_edited = [
             tf.convert_to_tensor(img_dir, dtype=tf.string) for img_dir in self.img_dirs
         ]
         self.img_label_edited = [
-            [tf.convert_to_tensor(df[0].values, dtype=tf.int16), tf.convert_to_tensor(df[1].values, dtype=tf.int16)] for df in df_list
+            tf.convert_to_tensor(df.values, dtype=tf.int16) for df in df_list
         ]
 
         # 데이터셋 생성

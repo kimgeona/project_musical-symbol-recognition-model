@@ -388,26 +388,29 @@ class MusicalSymbolModel:
         x = tf.keras.layers.Reshape(target_shape=(256, 32 * 12))(x)                                 # (256, 32 * 12)
         x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)    # (256, 32 * 12)
 
-        # Object Positioning : Reshape * Permute
+        # 1-1. Object Positioning : Reshape * Permute
         x_op = tf.keras.layers.Reshape(target_shape=(256, 32, 12))(x)                               # (256, 32, 12)
         x_op = tf.keras.layers.Permute(dims=(2, 3, 1))(x_op)                                        # (32, 12, 256)
 
-        # Object Positioning : Conv3_1 * GlobalAveragePooling2D
+        # 1-2. Object Positioning : Conv3_1 * GlobalAveragePooling2D
         x_op = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same', activation=None)(x_op)    # (32, 12, num_classes * 6)
-        x_op = tf.keras.layers.GlobalAveragePooling2D()(x_op)                                       # (1, num_classes * 6)
+        x_op = tf.keras.layers.GlobalAveragePooling2D()(x_op)                                       # (num_classes * 6)
 
-        # Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
-        x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                    # (256, 256)
-        x_omc = tf.keras.layers.GlobalAveragePooling1D()(x_omc)                     # (256,)
-        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid', name='out2')(x_omc)     # (num_classes,)
+        # 2. Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
+        x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                                    # (256, 256)
+        x_omc = tf.keras.layers.GlobalAveragePooling1D()(x_omc)                                     # (256)
+        x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_omc)                     # (num_classes)
 
         # [Object Positioning] 출력값이 [Object Multiclass Classification] 출력값에 의해 제어
         x_omc_expanded = tf.expand_dims(x_omc, axis=2)
         x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))
-        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6), name='out1')
+        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
+
+        # Concatenate
+        output = tf.keras.layers.Concatenate()([x_op_combined, x_omc])
 
         # 모델 생성
-        model = tf.keras.Model(inputs=[input], outputs=[x_op_combined, x_omc], name='MSRM_ObjectDetection')
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MSRM_ObjectDetection')
 
         # 모델 반환
         return model

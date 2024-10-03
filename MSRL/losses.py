@@ -57,13 +57,16 @@ class WeightedIoU(tf.keras.losses.Loss):
         # 가중치 계산
         self.weight_true = [n / total_count for n in class_count]
         self.weight_false = [1.0 - n for n in self.weight_true]
+
         # 가중치 범위 제한 (0+epsilon <= w <= 1)
         epsilon = tf.keras.backend.epsilon()
         self.weight_true = tf.clip_by_value(self.weight_true, epsilon, 1.0-epsilon)
         self.weight_false = tf.clip_by_value(self.weight_false, epsilon, 1.0-epsilon)
+
         # 가중치 로그함수 처리
         self.weight_true = 1.0 - tf.math.log(self.weight_true)
         self.weight_false = 1.0 - tf.math.log(self.weight_false)
+        
         # shape을 (batch_size, class_count, 1) 으로 변경
         self.weight_true = tf.reshape(self.weight_true, shape=(-1, len(class_count), 1))
         self.weight_false = tf.reshape(self.weight_false, shape=(-1, len(class_count), 1))
@@ -76,8 +79,8 @@ class WeightedIoU(tf.keras.losses.Loss):
         batch_size = tf.shape(y_true)[0]
 
         # shape 변경
-        y_true = tf.reshape(y_true, shape=(batch_size, -1, 6))
-        y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 6))
+        y_true = tf.reshape(y_true, shape=(batch_size, -1, 7))
+        y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 7))
 
         # 바운딩 박스 좌표와 상대적 중심 좌표 분리
         box_true = y_true[:, :, 0:4]
