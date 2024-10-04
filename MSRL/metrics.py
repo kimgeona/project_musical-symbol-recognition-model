@@ -16,8 +16,9 @@ class Accuracy(tf.keras.metrics.Metric):
         self.count = self.add_weight("count", initializer='zeros')
         
     def update_state(self, y_true, y_pred, sample_weight=None):
-        # 자료형 통일
-        y_true = tf.cast(y_true, dtype=y_pred.dtype)
+        # Nan 값 확인
+        tf.debugging.check_numerics(y_true, "NaN or Inf is not allowed")
+        tf.debugging.check_numerics(y_pred, "NaN or Inf is not allowed")
 
         # 배치 크기 알아내기
         batch_size = tf.shape(y_true)[0]
@@ -28,15 +29,19 @@ class Accuracy(tf.keras.metrics.Metric):
 
         # 바운딩 박스 좌표만 슬라이싱
         # (batch_size, -1, 7) -> (batch_size, -1)
-        y_true = y_true[:, :, 6]
-        y_pred = y_pred[:, :, 6]
+        y_true = y_true[:, :, 6:7]
+        y_pred = y_pred[:, :, 6:7]
 
         # y_pred 예측값 반올림
         y_pred = tf.round(y_pred)
 
+        # 자료형 int16으로 변경
+        y_true = tf.cast(y_true, dtype=tf.int16)
+        y_pred = tf.cast(y_pred, dtype=tf.int16)
+
         # y_true == y_pred 확인
         metric = tf.equal(y_true, y_pred)
-        metric = tf.reduce_all(metric, axis=-1)
+        metric = tf.reduce_all(metric, axis=[-2])
         metric = tf.cast(metric, dtype=tf.float32)
 
         # 확인 결과 저장(누적)
@@ -70,6 +75,10 @@ class HammingScore(tf.keras.metrics.Metric):
         self.count = self.add_weight("count", initializer='zeros')
 
     def update_state(self, y_true, y_pred, sample_weight=None):
+        # Nan 값 확인
+        tf.debugging.check_numerics(y_true, "NaN or Inf is not allowed")
+        tf.debugging.check_numerics(y_pred, "NaN or Inf is not allowed")
+
         # 자료형 통일
         y_true = tf.cast(y_true, dtype=y_pred.dtype)
 
@@ -82,14 +91,20 @@ class HammingScore(tf.keras.metrics.Metric):
 
         # 바운딩 박스 좌표만 슬라이싱
         # (batch_size, -1, 7) -> (batch_size, -1)
-        y_true = y_true[:, :, 6]
-        y_pred = y_pred[:, :, 6]
+        y_true = y_true[:, :, 6:7]
+        y_pred = y_pred[:, :, 6:7]
 
         # y_pred 예측값 반올림
         y_pred = tf.round(y_pred)
+
+        # 자료형 int16으로 변경
+        y_true = tf.cast(y_true, dtype=tf.int16)
+        y_pred = tf.cast(y_pred, dtype=tf.int16)
+
         # 올바르게 분류된 비율 계산
         metric = tf.equal(y_true, y_pred)
         metric = tf.cast(metric, dtype=tf.float32)
+
         # 확인 결과 저장(누적)
         self.count.assign_add(tf.reduce_sum(metric))
         self.total.assign_add(tf.cast(tf.size(metric), dtype=tf.float32))
@@ -108,8 +123,12 @@ class IoU(tf.keras.metrics.Metric):
     다중 레이블 y_true와 y_pred를 입력받아 IoU를 계산함.
     바운딩 박스 좌표가 애초에 없는(0으로 지정되어있는) y_true는 점수 합산에 들어가지 않음.
     """
-    def __init__(self, name='IoU', **kwargs):
+    def __init__(self, image_height, image_width, name='IoU', **kwargs):
         super(IoU, self).__init__(name=name, **kwargs)
+        # 이미지 크기 저장
+        self.image_height = tf.constant(image_height, dtype=tf.float32)
+        self.image_width = tf.constant(image_width, dtype=tf.float32)
+
         # 전체 샘플 수(total), 올바르게 분류된 레이블 수(count)
         self.total = self.add_weight("total", initializer='zeros')
         self.count = self.add_weight("count", initializer='zeros')
@@ -124,6 +143,25 @@ class IoU(tf.keras.metrics.Metric):
         # shape 변경
         y_true = tf.reshape(y_true, shape=(batch_size, -1, 7))
         y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 7))
+
+        # 스케일 복귀
+        x1 = y_true[:, :, 0:1] * self.image_width
+        y1 = y_true[:, :, 1:2] * self.image_height
+        x2 = y_true[:, :, 2:3] * self.image_width
+        y2 = y_true[:, :, 3:4] * self.image_height
+        cx = y_true[:, :, 4:5] * self.image_width
+        cy = y_true[:, :, 5:6] * self.image_height
+        p  = y_true[:, :, 6:7]
+        y_true = tf.concat([x1, y1, x2, y2, cx, cy, p], axis=-1)
+        #
+        x1 = y_pred[:, :, 0:1] * self.image_width
+        y1 = y_pred[:, :, 1:2] * self.image_height
+        x2 = y_pred[:, :, 2:3] * self.image_width
+        y2 = y_pred[:, :, 3:4] * self.image_height
+        cx = y_pred[:, :, 4:5] * self.image_width
+        cy = y_pred[:, :, 5:6] * self.image_height
+        p  = y_pred[:, :, 6:7]
+        y_pred = tf.concat([x1, y1, x2, y2, cx, cy, p], axis=-1)
 
         # 바운딩 박스 좌표만 슬라이싱
         bounding_true = y_true[:, :, 0:4]
@@ -157,7 +195,7 @@ class IoU(tf.keras.metrics.Metric):
         y1 = box[:, :, 1:2]
         x2 = box[:, :, 2:3]
         y2 = box[:, :, 3:4]
-        
+
         # 넓이 계산
         return tf.abs(tf.maximum(0.0, x2-x1) * tf.maximum(0.0, y2-y1))
 

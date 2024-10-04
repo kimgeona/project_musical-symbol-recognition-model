@@ -355,12 +355,12 @@ class MusicalSymbolModel:
         # 모델 입력
         input = tf.keras.layers.Input(shape=input_shape)
 
-        # Conv1_1 * MaxPooling2D * Conv1_2 * MaxPooling2D * BatchNormalization
+        # Conv1_1 * MaxPooling2D * Conv1_2 * MaxPooling2D 
         x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)    # (512, 192, 64)
         x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (256, 96, 64)
-        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)       # (256, 96, 128)
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)       # (256, 96, 128)     
         x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (128, 48, 128)
-        x = tf.keras.layers.BatchNormalization()(x)                                         
+        x = tf.keras.layers.BatchNormalization()(x)                                    
 
         # inception
         x1 = tf.keras.layers.Conv2D(64,  1, padding='same', activation='relu')(x)
@@ -377,24 +377,24 @@ class MusicalSymbolModel:
         x = tf.keras.layers.Concatenate(axis=-1)([x1, x2, x3, x4, x5, x6])                  # (128, 48, 640)
         x = tf.keras.layers.MaxPooling2D(pool_size=2)(x)                                    # (64, 24, 640)                            
 
-        # Conv2_1 * Conv2_2 * BatchNormalization * MaxPooling2D
+        # Conv2_1 * Conv2_2 * BatchNormalization * MaxPooling2D * Dropout
         x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
         x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)       # (64, 24, 256)
         x = tf.keras.layers.BatchNormalization()(x) 
         x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)                               # (32, 12, 256)
+        x = tf.keras.layers.Dropout(0.4)(x)
+
+        # 1. Object Positioning : Reshape * Permute * Conv3_1 * GlobalAveragePooling2D
+        # x_op = tf.keras.layers.Reshape(target_shape=(256, 32, 12))(x)                               # (256, 32, 12)
+        # x_op = tf.keras.layers.Permute(dims=(2, 3, 1))(x_op)                                        # (32, 12, 256)
+        x_op = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same')(x)                        # (32, 12, num_classes * 6)
+        x_op = tf.keras.layers.GlobalAveragePooling2D()(x_op)                                       # (num_classes * 6)
+        x_op = tf.keras.layers.Activation('sigmoid')(x_op)
 
         # Permute * Reshape * Multi-Head-Self-Attention
         x = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                                              # (256, 32, 12)
         x = tf.keras.layers.Reshape(target_shape=(256, 32 * 12))(x)                                 # (256, 32 * 12)
         x = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x, value=x, key=x)    # (256, 32 * 12)
-
-        # 1-1. Object Positioning : Reshape * Permute
-        x_op = tf.keras.layers.Reshape(target_shape=(256, 32, 12))(x)                               # (256, 32, 12)
-        x_op = tf.keras.layers.Permute(dims=(2, 3, 1))(x_op)                                        # (32, 12, 256)
-
-        # 1-2. Object Positioning : Conv3_1 * GlobalAveragePooling2D
-        x_op = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same', activation=None)(x_op)    # (32, 12, num_classes * 6)
-        x_op = tf.keras.layers.GlobalAveragePooling2D()(x_op)                                       # (num_classes * 6)
 
         # 2. Object Multiclass Classification : dense1_1 * GlobalAveragePooling1D * dense2_1
         x_omc = tf.keras.layers.Dense(256, activation='relu')(x)                                    # (256, 256)
@@ -402,15 +402,89 @@ class MusicalSymbolModel:
         x_omc = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_omc)                     # (num_classes)
 
         # [Object Positioning] 출력값이 [Object Multiclass Classification] 출력값에 의해 제어
-        x_omc_expanded = tf.expand_dims(x_omc, axis=2)
-        x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))
-        x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))
+        # x_omc_expanded = tf.expand_dims(x_omc, axis=2)                                              # (num_classes * 6)
+        # x_op_reshaped = tf.reshape(x_op, shape=(-1, num_classes, 6))                                # (num_classes, 6)
+        # x_op_combined = tf.reshape(x_omc_expanded * x_op_reshaped, shape=(-1, num_classes * 6))     # (num_classes * 6)
+        # x_op = tf.keras.layers.Activation('sigmoid')(x_op_combined)                                 # (num_classes * 6)
+
+        # [Object Positioning] 출력값을 원래 좌표 값으로 만들기
+        x_op = tf.reshape(x_op, shape=(-1, num_classes, 6))
+        x_op_x1 = x_op[:, :, 0:1] * input_shape[1]
+        x_op_y1 = x_op[:, :, 1:2] * input_shape[0]
+        x_op_x2 = x_op[:, :, 2:3] * input_shape[1]
+        x_op_y2 = x_op[:, :, 3:4] * input_shape[0]
+        x_op_cx = x_op[:, :, 4:5] * input_shape[1]
+        x_op_cy = x_op[:, :, 5:6] * input_shape[0]
+        x_op = tf.concat([x_op_x1, x_op_y1, x_op_x2, x_op_y2, x_op_cx, x_op_cy], axis=-1)
+        x_op = tf.reshape(x_op, shape=(-1, num_classes * 6))
 
         # Concatenate
-        output = tf.keras.layers.Concatenate()([x_op_combined, x_omc])
+        output = tf.keras.layers.Concatenate()([x_op, x_omc]) # (num_classes * 7)
 
         # 모델 생성
         model = tf.keras.Model(inputs=[input], outputs=[output], name='MSRM_ObjectDetection')
+
+        # 모델 반환
+        return model
+    
+    def model_OD2(self, input_shape=(512, 192, 1), num_classes=10):
+        """
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (256, 96, 64)
+
+        # Conv2_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (128, 48, 128)
+
+        # Conv3_1 * Conv3_2 * MaxPooling
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (64, 24, 256)
+
+        # Conv4_1 * BatchNormalization
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)  # (64, 24, 512)
+
+        # Conv5_1 * BatchNormalization * MaxPooling
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (32, 12, 512)
+
+        # Conv6_1
+        x = tf.keras.layers.Conv2D(512, (2, 2), padding='same', activation='relu')(x)  # (32, 12, 512)
+
+        # Conv7_1 * GlobalAveragePooling2D * Dense1_1
+        x_r = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same')(x)
+        x_r = tf.keras.layers.GlobalAveragePooling2D()(x_r)
+        x_r = tf.keras.layers.Dense(num_classes * 6, activation='sigmoid')(x_r)
+
+        # Permute * Reshape * Multi-Head-Self-Attention
+        x_c = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                                                    # (512, 32, 12)
+        x_c = tf.keras.layers.Reshape(target_shape=(512, 32 * 12))(x_c)                                     # (512, 32 * 12)
+        x_c = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(query=x_c, value=x_c, key=x_c)    # (512, 32 * 12)
+
+        # Dense2_1
+        x_c = tf.keras.layers.Dense(256, activation='relu')(x_c)            # (512, 256)
+
+        # GlobalAveragePooling1D를 사용해 시퀀스의 차원을 없애기
+        x_c = tf.keras.layers.GlobalAveragePooling1D()(x_c)                 # (256)
+
+        # Dense3_1
+        x_c = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_c) # (num_class)
+
+        # Concatenate
+        x_r = tf.reshape(x_r, shape=(-1, num_classes, 6))
+        x_c = tf.reshape(x_c, shape=(-1, num_classes, 1))
+        x = tf.concat([x_r, x_c], axis=-1)
+        output = tf.reshape(x, shape=(-1, num_classes * 7))
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MSRM_ObjectDetection_2')
 
         # 모델 반환
         return model
