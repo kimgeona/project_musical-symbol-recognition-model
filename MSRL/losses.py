@@ -149,11 +149,6 @@ class WeightedMultiTaskLoss(tf.keras.losses.Loss):
         tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
         
         return loss
-    
-    def get_config(self):
-        base_config = super().get_config()
-        return {**base_config, "weight_true":self.weight_true.numpy().tolist(), "weight_false":self.weight_false.numpy().tolist()}
-    
 
 #
 class WeightedIoU(tf.keras.losses.Loss):

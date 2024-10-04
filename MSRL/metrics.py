@@ -56,11 +56,7 @@ class Accuracy(tf.keras.metrics.Metric):
         # 누적 변수 초기화
         self.total.assign(0)
         self.count.assign(0)
-        
-    def get_config(self):
-        base_config = super(Accuracy, self).get_config()
-        return {**base_config}
-    
+
 # 해밍 점수
 class HammingScore(tf.keras.metrics.Metric):
     """
@@ -184,10 +180,6 @@ class IoU(tf.keras.metrics.Metric):
         self.total.assign(0)
         self.count.assign(0)
 
-    def get_config(self):
-        base_config = super(IoU, self).get_config()
-        return {**base_config}
-    
     # 박스 넓이 계산
     def box_area(self, box):
         # 각각의 좌표로 나누기
@@ -227,6 +219,69 @@ class PointDistance(tf.keras.metrics.Metric):
     """
     다중 레이블 y_true와 y_pred를 입력받아 중심좌표 예측이 얼마자 정답으로부터 멀어졌는지 계산함.
     """
+    def __init__(self, image_height, image_width, name='PointDistance', **kwargs):
+        super(PointDistance, self).__init__(name=name, **kwargs)
+        # 이미지 크기 저장
+        self.image_height = tf.constant(image_height, dtype=tf.float32)
+        self.image_width = tf.constant(image_width, dtype=tf.float32)
+
+        # 전체 샘플 수(total), 올바르게 분류된 레이블 수(count)
+        self.total = self.add_weight("total", initializer='zeros')
+        self.count = self.add_weight("count", initializer='zeros')
+    
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        # 자료형 통일
+        y_true = tf.cast(y_true, dtype=y_pred.dtype)
+    
+        # 배치 크기 알아내기
+        batch_size = tf.shape(y_true)[0]
+
+        # shape 변경
+        y_true = tf.reshape(y_true, shape=(batch_size, -1, 7))
+        y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 7))
+
+        # 바운딩 박스 존재 여부 슬라이싱
+        probability = y_true[:, :, 6:7]
+
+        # 악상기호 중심 좌표 슬라이싱 및 스케일 복귀 
+        cx = y_true[:, :, 4:5] * self.image_width
+        cy = y_true[:, :, 5:6] * self.image_height
+        y_true = tf.concat([cx, cy], axis=-1)
+        #
+        cx = y_pred[:, :, 4:5] * self.image_width
+        cy = y_pred[:, :, 5:6] * self.image_height
+        y_pred = tf.concat([cx, cy], axis=-1)
+
+        # 갯수와 중심점 사이 거리 구하기
+        distance_nums = tf.reduce_sum(probability)
+        distance = self.distance(y_true, y_pred) * probability
+
+        # 확인 결과 저장(누적)
+        self.total.assign_add(tf.cast(tf.reduce_sum(distance), dtype=tf.float32))
+        self.count.assign_add(tf.cast(distance_nums, dtype=tf.float32))
+
+    def distance(self, true, pred):
+        # 좌표 추출
+        x1 = true[:, :, 0:1]
+        y1 = true[:, :, 1:2]
+        x2 = pred[:, :, 0:1]
+        y2 = pred[:, :, 1:2]
+
+        # 입실론 값 생성
+        epsilon = tf.keras.backend.epsilon()
+
+        # 유클리디안 거리 계산
+        distance = tf.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + epsilon)
+        return distance
+    
+    def result(self):
+        # 평균 거리 계산
+        return tf.where(self.count==0.0, 0.0, self.total / self.count)
+    
+    def reset_state(self):
+        # 누적 변수 초기화
+        self.total.assign(0)
+        self.count.assign(0)
 
 # 정밀도
 class Precision(tf.keras.metrics.Metric):
