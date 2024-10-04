@@ -429,6 +429,13 @@ class MusicalSymbolModel:
     
     def model_OD2(self, input_shape=(512, 192, 1), num_classes=10):
         """
+        앞서 만들었던 모델 model_OD은 복잡한 연산 구조를 가져서인지,
+        사용했던 손실함수가 너무 복잡했는지 학습 도중 모델의 출력 결과가 Nan이 나옴.
+
+        Nan 값은 학습시 모델이 불안정하여 기울기가 잡아지지 않거나 명시적으로 추가한 
+        연산 과정에서 발생했을 가능성이 있다고 판단함.
+
+        그래서 모델 구조를 최대한 단순하게 만듦.
         """
         # 모델 입력
         input = tf.keras.layers.Input(shape=input_shape)
@@ -481,6 +488,96 @@ class MusicalSymbolModel:
         x_r = tf.reshape(x_r, shape=(-1, num_classes, 6))
         x_c = tf.reshape(x_c, shape=(-1, num_classes, 1))
         x = tf.concat([x_r, x_c], axis=-1)
+        output = tf.reshape(x, shape=(-1, num_classes * 7))
+
+        # 모델 생성
+        model = tf.keras.Model(inputs=[input], outputs=[output], name='MSRM_ObjectDetection_2')
+
+        # 모델 반환
+        return model
+    
+    def model_OD3(self, input_shape=(512, 192, 1), num_classes=10):
+        """
+        상대적으로 복잡하지 않은 손실함수 덕분이었는지 model_OD2 모델 학습에는 안전성을 보였음.
+        그래서 성능을 더 올릴 방법을 고안함.
+
+        기존에는 특성맵간의 관계 분석에 셀프-어텐션을 이용하고 이를 객체 존재 확률 예측으로만 사용하도록 하였음.
+        이번에는 특성맵간의 관계 분석 뿐만 아니라, 특성맵의 공간적인 특징도 잡아야겠다고 생각하여
+        공간적인 특징도 셀프-어텐션 층으로 구성을 하여 연결함.
+
+        그리고 model_OD2와 달라진 점은 바로 바운딩 박스의 예측도 셀프-어텐션의 출력을 이용하도록 하였다는 것이다.
+        정말 다행히도 성능은 지금까지 학습했던 모델들 가운데 최고 성능을 보여주고 있음.
+
+        TODO:
+        하지만 바운딩 박스의 좌표 예측이 살짝 부족한데 이는 손실함수를 조금 손봐야 될 것으로 예상됨.
+        그리고 추가적으로 데이터셋을 전처리하는 함수들을 작성하여 과적합을 방지할 수 있도록 해야할 것으로 예상됨.
+        """
+        # 모델 입력
+        input = tf.keras.layers.Input(shape=input_shape)
+
+        # Conv1_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (256, 96, 64)
+
+        # Conv2_1 * MaxPooling
+        x = tf.keras.layers.Conv2D(128, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (128, 48, 128)
+
+        # Conv3_1 * Conv3_2 * MaxPooling
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.Conv2D(256, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (64, 24, 256)
+
+        # Conv4_1 * BatchNormalization
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)  # (64, 24, 512)
+
+        # Conv5_1 * BatchNormalization * MaxPooling
+        x = tf.keras.layers.Conv2D(512, (3, 3), padding='same', activation='elu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x)  # (32, 12, 512)
+
+        # Conv6_1
+        x = tf.keras.layers.Conv2D(512, (2, 2), padding='same', activation='relu')(x)  # (32, 12, 512)
+
+        # Channel Attention : 특성맵간 관계 분석
+        a_c = tf.keras.layers.Permute(dims=(3, 1, 2))(x)                    # (512, 32, 12)
+        a_c = tf.keras.layers.Reshape(target_shape=(512, 32 * 12))(a_c)     # (512, 32 * 12)
+        a_c = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(  # (512, 32 * 12)
+            query=a_c, 
+            value=a_c, 
+            key=a_c
+        )
+        a_c = tf.keras.layers.Reshape(target_shape=(512, 32, 12))(a_c)
+        a_c = tf.keras.layers.Permute(dims=(2, 3, 1))(a_c)
+
+        # Spatial Attention : 위치적 특성간 관계 분석
+        a_s = tf.keras.layers.Reshape(target_shape=(32 * 12, 512))(x)       # (32 * 12, 512)
+        a_s = tf.keras.layers.MultiHeadAttention(num_heads=8, key_dim=64)(  # (512, 32 * 12)
+            query=a_s, 
+            value=a_s, 
+            key=a_s
+        )
+        a_s = tf.keras.layers.Reshape(target_shape=(32, 12, 512))(x)
+        
+        # Concatenate * Conv7_1
+        x = tf.keras.layers.Concatenate(axis=-1)([a_c, a_s])    # (32, 12, 1024)
+        x = tf.keras.layers.Conv2D(256, 1, padding='same')(x)   # (32, 12, 256)
+
+        # Bounding Box Regression
+        x_BBR = tf.keras.layers.Conv2D(num_classes * 6, 1, padding='same')(x)   # (32, 12, num_classes * 6)
+        x_BBR = tf.keras.layers.GlobalAveragePooling2D()(x_BBR)                 # (num_classes * 6)
+        x_BBR = tf.keras.layers.Activation('sigmoid')(x_BBR)
+
+        # Existence Probability Classification
+        x_EPC = tf.keras.layers.Conv2D(num_classes, 1, padding='same')(x)       # (32, 12, num_classes)
+        x_EPC = tf.keras.layers.Flatten()(x_EPC)                                # (32 * 12 * num_classes)
+        x_EPC = tf.keras.layers.Dense(num_classes, activation='sigmoid')(x_EPC) # (num_classes * 1)
+
+        # Concatenate
+        x_BBR = tf.reshape(x_BBR, shape=(-1, num_classes, 6))
+        x_EPC = tf.reshape(x_EPC, shape=(-1, num_classes, 1))
+        x = tf.concat([x_BBR, x_EPC], axis=-1)
         output = tf.reshape(x, shape=(-1, num_classes * 7))
 
         # 모델 생성
