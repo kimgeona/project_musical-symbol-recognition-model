@@ -6,17 +6,81 @@ import matplotlib.pyplot as plt     # 그래프 도구
 import MSRL.functions as myfn
 
 
-# (작성중) 데이터셋 미리 보기
-def preview(dataset, lable_class, num_images):
-    return
-    plt.figure(figsize=(10, 10))
-    for images, labels in dataset.take(1):
-        for i in range(num_images):
-            ax = plt.subplot(4, 8, i + 1)
-            plt.imshow(images[i], cmap='gray')
-            print(i, ' : ', [name for name, mask in zip(lable_class, tf.gather(labels[0], i).numpy()) if mask==1])
-            plt.title(i)
-            plt.axis('off')
+# 데이터셋 미리 보기
+def preview(image, true, pred):
+    import numpy as np                  # 넘파이
+    import cv2                          # OpenCV
+
+    # batch 크기 알아내기
+    batch_size = tf.shape(image)[0]
+
+    # shape 변경
+    true = tf.reshape(true, shape=(batch_size, -1, 7))
+    pred = tf.reshape(pred, shape=(batch_size, -1, 7))
+
+    # 원래 스케일로 복원 (0~255)
+    image = tf.squeeze(image, axis=-1)  # (32, 512, 192)
+    image = (1.0 - image) * 255  # 0~1 범위를 0~255 범위로 변환
+    image = tf.clip_by_value(image, 0, 255)  # 0과 255로 클리핑
+    image = tf.cast(image, tf.uint8)  # uint8로 변환
+
+    # 이미지 크기 조사
+    image_height = tf.shape(image[0])[0].numpy()
+    image_width = tf.shape(image[0])[1].numpy()
+
+    # 컬러로 바꿔야 하므로 grayscale 이미지를 채널을 3개로 복제
+    image = tf.repeat(image[..., tf.newaxis], repeats=3, axis=-1)  # (32, 512, 192, 3)
+
+    # 바운딩 박스를 그릴 색상을 준비
+    colors = [(255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0), (255, 0, 255)]  # 다양한 색상 리스트
+
+    # 배치에서 첫 번째 이미지만을 시각화 예시로 사용
+    image_np = image[0].numpy().astype(np.uint8)  # 첫 번째 이미지를 numpy로 변환
+    true_boxes = true[0].numpy()  # 첫 번째 이미지의 실제 바운딩 박스
+    pred_boxes = pred[0].numpy()  # 첫 번째 이미지의 예측 바운딩 박스
+
+    # 바운딩 박스를 그리는 함수
+    def draw_bounding_boxes(image, boxes, color):
+        for box in boxes:
+            x1 = box[0] * image_width
+            y1 = box[1] * image_height
+            x2 = box[2] * image_width
+            y2 = box[3] * image_height
+            cx = box[4] * image_width
+            cy = box[5] * image_height
+            if x1 > x2 or y1 > y2:
+                continue
+            start_point = (int(x1), int(y1))
+            end_point = (int(x2), int(y2))
+            center_point = (int(cx), int(cy))
+            cv2.rectangle(image, start_point, end_point, color, 2)
+            cv2.drawMarker(image, center_point, color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
+        return image
+
+    # 실제 바운딩 박스 그리기 (파란색)
+    image_with_true_boxes = draw_bounding_boxes(image_np.copy(), true_boxes, colors[0])
+
+    # 예측 바운딩 박스 그리기 (빨간색)
+    image_with_pred_boxes = draw_bounding_boxes(image_np.copy(), pred_boxes, colors[1])
+
+    # 이미지를 시각화
+    plt.figure(figsize=(6, 9))
+
+    # 실제 바운딩 박스가 그려진 이미지
+    plt.subplot(1, 2, 1)
+    plt.imshow(image_with_true_boxes)
+    plt.title('True Bounding Boxes')
+    plt.axis('off')
+
+    # 예측 바운딩 박스가 그려진 이미지
+    plt.subplot(1, 2, 2)
+    plt.imshow(image_with_pred_boxes)
+    plt.title('Predicted Bounding Boxes')
+    plt.axis('off')
+
+    # 이미지 간격 조정
+    plt.subplots_adjust(wspace=0.2)  # 이미지 사이의 간격 조정
+
     plt.show()
 
 # 악상 기호 데이터셋 클래스
@@ -87,16 +151,21 @@ class MusicalSymbolDataset:
         for i, ds in enumerate(dss):
             # 마지막 데이터셋은 전처리 건너뛰기
             if i==len(dss)-1: 
-                continue
-            # 전처리
-            ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
-            #ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)        # 이미지 회전
-            #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
-            #ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
-            ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
-            # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
-            ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
-            ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+                # test 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+            else:
+                # train, validation 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                #ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)        # 이미지 회전
+                #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+                #ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
+                # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+
             # 전처리된 데이터셋 저장
             dss[i] = ds
 
