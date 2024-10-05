@@ -42,19 +42,20 @@ def preview(image, true, pred):
     # 바운딩 박스를 그리는 함수
     def draw_bounding_boxes(image, boxes, color):
         for box in boxes:
-            x1 = box[0] * image_width
-            y1 = box[1] * image_height
-            x2 = box[2] * image_width
-            y2 = box[3] * image_height
-            cx = box[4] * image_width
-            cy = box[5] * image_height
-            if x1 > x2 or y1 > y2:
+            cx = box[0] * image_width
+            cy = box[1] * image_height
+            w  = box[2] * image_width
+            h  = box[3] * image_height
+            rx = box[4] * image_width
+            ry = box[5] * image_height
+            p  = box[6]
+            if p < 0.8:
                 continue
-            start_point = (int(x1), int(y1))
-            end_point = (int(x2), int(y2))
-            center_point = (int(cx), int(cy))
+            start_point = (int(cx - (w / 2)), int(cy - (h / 2)))
+            end_point = (int(cx + (w / 2)), int(cy + (h / 2)))
+            relative_point = (int(rx), int(ry))
             cv2.rectangle(image, start_point, end_point, color, 2)
-            cv2.drawMarker(image, center_point, color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
+            cv2.drawMarker(image, relative_point, color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
         return image
 
     # 실제 바운딩 박스 그리기 (파란색)
@@ -153,6 +154,7 @@ class MusicalSymbolDataset:
             if i==len(dss)-1: 
                 # test 전처리
                 ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
                 ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
                 ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
                 ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
@@ -161,7 +163,7 @@ class MusicalSymbolDataset:
                 ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
                 #ds = ds.map(myfn.rotate_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)        # 이미지 회전
                 #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
-                #ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
                 ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
                 # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
                 ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기

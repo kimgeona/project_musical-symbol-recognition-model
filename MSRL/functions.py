@@ -28,6 +28,52 @@ def scale_image(image, label):
 # 이미지 이동
 @tf.function
 def shift_image(image, label):
+    # 이미지 크기 계산
+    width = tf.cast(tf.shape(image)[0], dtype=tf.float32)
+    height = tf.cast(tf.shape(image)[1], dtype=tf.float32)
+
+    # 이미지 이동할 크기 계산
+    shift_x = tf.random.uniform([], tf.cast(-0.07 * width, dtype=tf.int32), tf.cast(0.07 * width, dtype=tf.int32), dtype=tf.int32)
+    shift_y = tf.random.uniform([], tf.cast(-0.07 * height, dtype=tf.int32), tf.cast(0.07 * height, dtype=tf.int32), dtype=tf.int32)
+
+    # 이미지 이동
+    mask_zero = tf.zeros_like(image)
+    shifted_image = tf.roll(image, shift=[shift_y, shift_x], axis=[0, 1])
+
+    # 이동하고 빈자리 0으로 채우기
+    if shift_y > 0:
+        shifted_image = tf.concat([mask_zero[:shift_y, :, :], shifted_image[shift_y:, :, :]], axis=0)
+    if shift_y < 0:
+        shifted_image = tf.concat([shifted_image[:shift_y, :, :], mask_zero[shift_y:, :, :]], axis=0)
+
+    if shift_x > 0:
+        shifted_image = tf.concat([mask_zero[:, :shift_x, :], shifted_image[:, shift_x:, :]], axis=1)
+    if shift_x < 0:
+        shifted_image = tf.concat([shifted_image[:, :shift_x, :], mask_zero[:, shift_x:, :]], axis=1)
+    
+    # 이미지를 이동
+    image = shifted_image
+
+    # 데이터 형태 변경
+    label = tf.reshape(label, shape=(-1, 7))
+
+    # 데이터 분리, 레이블 데이터 좌표 수정
+    shift_x = tf.cast(shift_x, tf.int16)
+    shift_y = tf.cast(shift_y, tf.int16)
+    x1 = label[:, 0:1] + shift_x
+    y1 = label[:, 1:2] + shift_y
+    x2 = label[:, 2:3] + shift_x
+    y2 = label[:, 3:4] + shift_y
+    rx = label[:, 4:5] + shift_x
+    ry = label[:, 5:6] + shift_y
+    p  = label[:, 6:7]
+
+    # 하나로 합치기
+    label = tf.concat([x1, y1, x2, y2, rx, ry, p], axis=-1)
+
+    # 원래 형태로 변경
+    label = tf.reshape(label, [-1])
+
     return image, label
 
 # 이미지 잡음 추가
@@ -164,7 +210,3 @@ def coords_scaling(image, label):
     label = tf.reshape(label, [-1])
 
     return image, label
-
-# 좌표 이동
-def coords_move(label):
-    return label
