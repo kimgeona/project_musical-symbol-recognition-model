@@ -154,6 +154,7 @@ class MusicalSymbolDataset:
                 # test 전처리
                 ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
                 ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
                 ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
             else:
                 # train, validation 전처리
@@ -164,6 +165,7 @@ class MusicalSymbolDataset:
                 ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
                 # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
                 ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
                 ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
 
             # 전처리된 데이터셋 저장

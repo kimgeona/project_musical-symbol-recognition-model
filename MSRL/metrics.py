@@ -141,31 +141,36 @@ class IoU(tf.keras.metrics.Metric):
         y_pred = tf.reshape(y_pred, shape=(batch_size, -1, 7))
 
         # 스케일 복귀
-        x1 = y_true[:, :, 0:1] * self.image_width
-        y1 = y_true[:, :, 1:2] * self.image_height
-        x2 = y_true[:, :, 2:3] * self.image_width
-        y2 = y_true[:, :, 3:4] * self.image_height
-        cx = y_true[:, :, 4:5] * self.image_width
-        cy = y_true[:, :, 5:6] * self.image_height
+        cx = y_true[:, :, 0:1] * self.image_width
+        cy = y_true[:, :, 1:2] * self.image_height
+        w  = y_true[:, :, 2:3] * self.image_width
+        h  = y_true[:, :, 3:4] * self.image_height
+        rx = y_true[:, :, 4:5] * self.image_width
+        ry = y_true[:, :, 5:6] * self.image_height
         p  = y_true[:, :, 6:7]
-        y_true = tf.concat([x1, y1, x2, y2, cx, cy, p], axis=-1)
+        y_true = tf.concat([cx, cy, w, h, rx, ry, p], axis=-1)
         #
-        x1 = y_pred[:, :, 0:1] * self.image_width
-        y1 = y_pred[:, :, 1:2] * self.image_height
-        x2 = y_pred[:, :, 2:3] * self.image_width
-        y2 = y_pred[:, :, 3:4] * self.image_height
-        cx = y_pred[:, :, 4:5] * self.image_width
-        cy = y_pred[:, :, 5:6] * self.image_height
+        cx = y_pred[:, :, 0:1] * self.image_width
+        cy = y_pred[:, :, 1:2] * self.image_height
+        w  = y_pred[:, :, 2:3] * self.image_width
+        h  = y_pred[:, :, 3:4] * self.image_height
+        rx = y_pred[:, :, 4:5] * self.image_width
+        ry = y_pred[:, :, 5:6] * self.image_height
         p  = y_pred[:, :, 6:7]
-        y_pred = tf.concat([x1, y1, x2, y2, cx, cy, p], axis=-1)
+        y_pred = tf.concat([cx, cy, w, h, rx, ry, p], axis=-1)
+
+        # 바운딩 박스 존재 여부 슬라이싱
+        probability = y_true[:, :, 6:7]
 
         # 바운딩 박스 좌표만 슬라이싱
-        bounding_true = y_true[:, :, 0:4]
-        bounding_pred = y_pred[:, :, 0:4]
+        y_true = y_true[:, :, 0:4]
+        y_pred = y_pred[:, :, 0:4]
 
+        # IoU 갯수 계산
+        iou_nums = tf.reduce_sum(probability)
+        
         # IoU값 계산
-        iou_nums = tf.reduce_sum(tf.cast(self.box_area(bounding_true)!=0.0, dtype=tf.int16))
-        iou = tf.where(self.box_area(bounding_true)==0.0, 0.0, self.compute_IoU(bounding_true, bounding_pred))
+        iou = self.compute_IoU(y_true, y_pred) * probability
 
         # 확인 결과 저장(누적)
         self.total.assign_add(tf.cast(tf.reduce_sum(iou), dtype=tf.float32))
@@ -183,36 +188,43 @@ class IoU(tf.keras.metrics.Metric):
     # 박스 넓이 계산
     def box_area(self, box):
         # 각각의 좌표로 나누기
-        x1 = box[:, :, 0:1]
-        y1 = box[:, :, 1:2]
-        x2 = box[:, :, 2:3]
-        y2 = box[:, :, 3:4]
+        w  = box[:, :, 2:3]
+        h  = box[:, :, 3:4]
 
         # 넓이 계산
-        return tf.abs(tf.maximum(0.0, x2-x1) * tf.maximum(0.0, y2-y1))
+        return tf.abs(w * h)
+
+    # 교집합 크기 계산
+    def box_intersection_area(self, box1, box2):
+        # 데이터 추출
+        x1 = box1[:, :, 0:1]
+        y1 = box1[:, :, 1:2]
+        w1 = box1[:, :, 2:3] / 2.0
+        h1 = box1[:, :, 3:4] / 2.0
+        x2 = box2[:, :, 0:1]
+        y2 = box2[:, :, 1:2]
+        w2 = box2[:, :, 2:3] / 2.0
+        h2 = box2[:, :, 3:4] / 2.0
+
+        # 두 박스의 경계 비교
+        inter_width = tf.maximum(0.0, tf.minimum((x1 + w1), (x2 + w2)) - tf.maximum((x1 - w1), (x2 - w2)))
+        inter_height = tf.maximum(0.0, tf.minimum((y1 + h1), (y2 + h2)) - tf.maximum((y1 - h1), (y2 - h2)))
+
+        # 교집합 너비 계산
+        area = inter_width * inter_height
+        return area
 
     # IoU 계산
     def compute_IoU(self, box1, box2):
-        # box 넓이 계싼
-        box1_area = self.box_area(box1)
-        box2_area = self.box_area(box2)
+        # 교집합 크기 계산
+        intersection_area = self.box_intersection_area(box1, box2)
 
-        # 교집합 영역의 박스 좌표 구함
-        box3 = tf.concat([
-            tf.maximum(box1[:, :, 0:1], box2[:, :, 0:1]),
-            tf.maximum(box1[:, :, 1:2], box2[:, :, 1:2]),
-            tf.minimum(box1[:, :, 2:3], box2[:, :, 2:3]),
-            tf.minimum(box1[:, :, 3:4], box2[:, :, 3:4])
-        ], axis=-1)
-        
-        # 교집합 영역의 넓이 계산
-        intersection_area = tf.where(box2_area==0.0, 0.0, self.box_area(box3))
+        # 합집합 크기 계산
+        union_area = self.box_area(box1) + self.box_area(box2) - intersection_area
 
-        # 합집합 영역 계산
-        union_area = box1_area + box2_area - intersection_area
-
-        # 0~1 사이값 리턴
-        return tf.where(union_area==0.0, 0.0, intersection_area / union_area)
+        # iou값 계산
+        iou = tf.where(union_area==0.0, 0.0, intersection_area / union_area)
+        return iou
 
 # 중심 좌표 떨어진 정도
 class PointDistance(tf.keras.metrics.Metric):
@@ -244,13 +256,13 @@ class PointDistance(tf.keras.metrics.Metric):
         probability = y_true[:, :, 6:7]
 
         # 악상기호 중심 좌표 슬라이싱 및 스케일 복귀 
-        cx = y_true[:, :, 4:5] * self.image_width
-        cy = y_true[:, :, 5:6] * self.image_height
-        y_true = tf.concat([cx, cy], axis=-1)
+        rx = y_true[:, :, 4:5] * self.image_width
+        ry = y_true[:, :, 5:6] * self.image_height
+        y_true = tf.concat([rx, ry], axis=-1)
         #
-        cx = y_pred[:, :, 4:5] * self.image_width
-        cy = y_pred[:, :, 5:6] * self.image_height
-        y_pred = tf.concat([cx, cy], axis=-1)
+        rx = y_pred[:, :, 4:5] * self.image_width
+        ry = y_pred[:, :, 5:6] * self.image_height
+        y_pred = tf.concat([rx, ry], axis=-1)
 
         # 갯수와 중심점 사이 거리 구하기
         distance_nums = tf.reduce_sum(probability)
