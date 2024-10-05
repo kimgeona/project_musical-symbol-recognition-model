@@ -93,35 +93,70 @@ class WeightedMultiTaskLoss(tf.keras.losses.Loss):
 
         return loss_mean
     
+    # 박스 넓이 계산
+    def box_area(self, box):
+        # 각각의 좌표로 나누기
+        w  = box[:, :, 2:3]
+        h  = box[:, :, 3:4]
+
+        # 넓이 계산
+        return tf.abs(w * h)
+
+    # 교집합 크기 계산
+    def box_intersection_area(self, box1, box2):
+        # 데이터 추출
+        x1 = box1[:, :, 0:1]
+        y1 = box1[:, :, 1:2]
+        w1 = box1[:, :, 2:3] / 2.0
+        h1 = box1[:, :, 3:4] / 2.0
+        x2 = box2[:, :, 0:1]
+        y2 = box2[:, :, 1:2]
+        w2 = box2[:, :, 2:3] / 2.0
+        h2 = box2[:, :, 3:4] / 2.0
+
+        # 두 박스의 경계 비교
+        inter_width = tf.maximum(0.0, tf.minimum((x1 + w1), (x2 + w2)) - tf.maximum((x1 - w1), (x2 - w2)))
+        inter_height = tf.maximum(0.0, tf.minimum((y1 + h1), (y2 + h2)) - tf.maximum((y1 - h1), (y2 - h2)))
+
+        # 교집합 너비 계산
+        area = inter_width * inter_height
+        return area
+    
     def bounding_loss(self, true, pred):
-        # 두 좌표 차이 계산
-        distance_abs = tf.abs(true - pred)
-
-        # distance_abs 범위 제한 (0 + epsilon <= distance_abs <= 1 - epsilon)
+        # 입실론 값 생성
         epsilon = tf.keras.backend.epsilon()
-        distance_abs = tf.clip_by_value(1.0-distance_abs, epsilon, 1.0-epsilon)
-        tf.debugging.check_numerics(distance_abs, "NaN or Inf is not allowed")
 
-        # 차이가 클 수록 손실이 커지게
+        # a. 두 좌표 차이 계산
+        distance_abs = tf.abs(true - pred)
+        distance_abs = tf.reduce_mean(distance_abs, axis=-1, keepdims=True)
+        distance_abs = tf.clip_by_value(1.0-distance_abs, epsilon, 1.0-epsilon)
+
+        # b. IoU 계산
+        intersection_area = self.box_intersection_area(true, pred)                  # 교집합 크기 계산
+        union_area = self.box_area(true) + self.box_area(pred) - intersection_area  # 합집합 크기 계산
+        iou = tf.where(union_area==0.0, 0.0, intersection_area / union_area)
+        iou = tf.clip_by_value(iou, epsilon, 1.0-epsilon)
+
+        # 손실 선택
+        loss = tf.where(self.box_area(true)==0.0, distance_abs, iou)
+        tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
+
+        # -log 함수 통과
         loss = -tf.math.log(distance_abs)
         tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
-
-        # 손실 평균
-        loss = tf.reduce_mean(loss, axis=-1, keepdims=True)
-        tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
-
+    
         return loss
     
     def center_loss(self, true, pred):
+        # 입실론 값 생성
+        epsilon = tf.keras.backend.epsilon()
+
         # 두 좌표 차이 계산
         distance_abs = tf.abs(true - pred)
-
-        # distance_abs 범위 제한 (0 + epsilon <= distance_abs <= 1 - epsilon)
-        epsilon = tf.keras.backend.epsilon()
         distance_abs = tf.clip_by_value(1.0-distance_abs, epsilon, 1.0-epsilon)
         tf.debugging.check_numerics(distance_abs, "NaN or Inf is not allowed")
 
-        # 차이가 클 수록 손실이 커지게
+        # -log 함수 통과
         loss = -tf.math.log(distance_abs)
         tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
 
@@ -132,20 +167,16 @@ class WeightedMultiTaskLoss(tf.keras.losses.Loss):
         return loss
 
     def probility_loss(self, true, pred):
+        # 입실론 값 생성
+        epsilon = tf.keras.backend.epsilon()
+
         # 두 좌표 차이 계산 (이진 크로스 엔트로피)
         distance_abs = tf.abs(true - pred)
-
-        # distance_abs 범위 제한 (0 + epsilon <= distance_abs <= 1 - epsilon)
-        epsilon = tf.keras.backend.epsilon()
         distance_abs = tf.clip_by_value(1.0-distance_abs, epsilon, 1.0-epsilon)
         tf.debugging.check_numerics(distance_abs, "NaN or Inf is not allowed")
 
-        # 차이가 클 수록 손실이 커지게
+        # -log 함수 통과
         loss = -tf.math.log(distance_abs)
-        tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
-
-        # 손실 평균
-        loss = tf.reduce_mean(loss, axis=-1, keepdims=True)
         tf.debugging.check_numerics(loss, "NaN or Inf is not allowed")
         
         return loss
