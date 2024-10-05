@@ -90,6 +90,11 @@ def add_noise(image, label):
 def shake_image(image, label):
     return image, label
 
+# 이미지 자르기
+def cut_image(image, label):
+    
+    return image, label
+
 # 좌표 클리핑
 @tf.function
 def coords_clipping(image, label):
