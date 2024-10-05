@@ -75,7 +75,7 @@ def shift_image(image, label):
     label = tf.reshape(label, [-1])
 
     return image, label
-
+   
 # 이미지 잡음 추가
 @tf.function
 def add_noise(image, label):
@@ -92,7 +92,41 @@ def shake_image(image, label):
 
 # 이미지 자르기
 def cut_image(image, label):
-    
+    # 이미지 크기 조사
+    height = tf.cast(tf.shape(image)[0], dtype=tf.float32)
+    width = tf.cast(tf.shape(image)[1], dtype=tf.float32)
+
+    # 이미지 시작 지점 계산
+    y_start = (height - 512.0) / 2.0
+    x_start = (width - 192.0) / 2.0
+
+    # 자료형 변환
+    y_start = tf.cast(y_start, dtype=tf.int32)
+    x_start = tf.cast(x_start, dtype=tf.int32)
+
+    # 이미지 자르기
+    image = image[y_start:y_start+512, x_start:x_start+192, :]
+
+    # 데이터 형태 변경
+    label = tf.reshape(label, shape=(-1, 7))
+
+    # 데이터 분리, 레이블 데이터 좌표 수정
+    y_start = tf.cast(y_start, dtype=tf.int16)
+    x_start = tf.cast(x_start, dtype=tf.int16)
+    x1 = label[:, 0:1] - x_start
+    y1 = label[:, 1:2] - y_start
+    x2 = label[:, 2:3] - x_start
+    y2 = label[:, 3:4] - y_start
+    rx = label[:, 4:5] - x_start
+    ry = label[:, 5:6] - y_start
+    p  = label[:, 6:7]
+
+    # 하나로 합치기
+    label = tf.concat([x1, y1, x2, y2, rx, ry, p], axis=-1)
+
+    # 원래 형태로 변경
+    label = tf.reshape(label, [-1])
+
     return image, label
 
 # 좌표 클리핑
