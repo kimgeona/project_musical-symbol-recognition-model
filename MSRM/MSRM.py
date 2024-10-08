@@ -7,6 +7,117 @@ import torchvision.ops as ops
 # 
 from ultralytics import YOLO
 
+# 이미지 저장
+def save(
+        image, dir,
+        boxes, confidences, classes,
+        class_names=None,
+        font_scale=0.5, thickness=2
+    ):
+    # 바운딩 박스가 그려진 이미지 생성
+    preview_image = draw_boxes_on_image(
+        image, boxes, confidences, classes, class_names, font_scale, thickness
+    )
+    # 저장
+    cv2.imwrite(dir, preview_image)
+
+# 이미지 미리보기
+def preview(
+        image, 
+        boxes, confidences, classes,
+        class_names=None,
+        window_height=900,
+        font_scale=0.5, thickness=2
+    ):
+    # 창 크기 고정
+    cv2.namedWindow('Preview Image', cv2.WINDOW_NORMAL)
+
+    # 창 크기 계산
+    height, width, channel = image.shape
+    window_h = window_height
+    window_w = int(width * (window_h / height))
+
+    # 창 크기 조절
+    cv2.resizeWindow('Preview Image', window_w, window_h)
+
+    # 바운딩 박스가 그려진 이미지 생성
+    preview_image = draw_boxes_on_image(
+        image, boxes, confidences, classes, class_names, font_scale, thickness
+    )
+
+    # 새로운 크기로 이미지 리사이즈 (선명도 유지 위해 INTER_AREA 사용)
+    preview_image = cv2.resize(preview_image, (window_w, window_h), interpolation=cv2.INTER_AREA)
+
+    # 바운딩 박스가 그려진 이미지 미리보기
+    cv2.imshow('Preview Image', preview_image)
+    cv2.waitKey()
+    cv2.destroyAllWindows()
+
+# 이미지에 바운딩 박스 그리기 (최대 20개 클래스까지 가능)
+def draw_boxes_on_image(
+        image, 
+        boxes, confidences, classes,
+        class_names=None,
+        font_scale=0.5, thickness=2
+    ):
+    # 이미지 복사 (원본 이미지를 수정하지 않도록)
+    img_copy = image.copy()
+
+    # 클래스 ID와 색상을 매핑하는 딕셔너리
+    class_colors = {
+        0: (0, 255, 0),         # 클래스  0: 초록색 -> staff
+        1: (192, 192, 192),     # 클래스  1: 회색   -> clef
+        2: (255, 0, 255),       # 클래스  2: 자홍색 -> key
+        3: (255, 255, 0),       # 클래스  3: 청록색 -> measure
+        4: (0, 0, 255),         # 클래스  4: 빨간색 -> rest
+        5: (128, 128, 0),       # 클래스  5: 올리브 -> time
+        6: (255, 0, 0),         # 클래스  6: 파란색 -> note
+        7: (75, 0, 130),        # 클래스  7: 인디고         -> accidental
+        8: (255, 192, 203),     # 클래스  8: 핑크색         -> articulation
+        9: (0, 255, 127),       # 클래스  9: 시안           -> dynamic
+        10: (255, 165, 0),      # 클래스 10: 오렌지색       -> glissando
+        11: (139, 69, 19),      # 클래스 11: 초콜릿색       -> octave
+        12: (0, 0, 128),        # 클래스 12: 어두운 파란색  -> ornament
+        13: (0, 128, 128),      # 클래스 13: 어두운 청록색  -> repetition
+        14: (0, 255, 255),      # 클래스 14: 노란색         -> tie
+        15: (128, 0, 0),        # 클래스 15: 어두운 빨간색
+        16: (0, 128, 0),        # 클래스 16: 어두운 초록색
+        17: (255, 105, 180),    # 클래스 17: 딸기색
+        18: (255, 215, 0),      # 클래스 18: 금색
+        19: (255, 20, 147),     # 클래스 19: 딥 핑크
+    }
+
+    # 박스, 점수, 클래스 순회하며 표시
+    for i in range(len(boxes)):
+        # 박스 좌표 (x_min, y_min, x_max, y_max)
+        x_min, y_min, x_max, y_max = map(int, boxes[i])
+
+        # 현재 클래스에 대한 색상 추출
+        class_id = int(classes[i])
+        color = class_colors[class_id]
+
+        # 바운딩 박스 그리기
+        cv2.rectangle(img_copy, (x_min, y_min), (x_max, y_max), color, thickness)
+
+        # 클래스 이름과 점수
+        class_id = int(classes[i])
+        confidence = float(confidences[i])
+        label = f'{confidence:.2f}'  # 점수
+
+        # 클래스 이름이 제공되었으면 추가
+        if class_names is not None:
+            label = f'{class_names[class_id]}: {confidence:.2f}'
+
+        # 텍스트의 위치와 크기 설정
+        (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        cv2.rectangle(img_copy, (x_min, y_min - text_height - baseline), (x_min + text_width, y_min), color, thickness=cv2.FILLED)
+        cv2.putText(img_copy, label, (x_min, y_min - baseline), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
+
+    #
+    return img_copy
+
+
+# 악상기호 대분류 모델
 class SymbolDetector:
     def __init__(
         self, 
@@ -99,8 +210,8 @@ class SymbolDetector:
                         confidences_tmp = torch.tensor([])
                         classes_tmp = torch.tensor([])
                     # preview 이미지 생성
-                    preview_image = self.__draw_boxes_on_image(
-                        image,
+                    preview_image = draw_boxes_on_image(
+                        255 - image,
                         boxes_tmp, confidences_tmp, classes_tmp
                     )
                     # 이미지 크기에 맞춰 윈도우 크기 변경
@@ -189,43 +300,6 @@ class SymbolDetector:
         # 결과 반환
         return boxes, confidences, classes
 
-    # 박스, 점수, 클래스를 이미지에 표시하는 함수
-    def __draw_boxes_on_image(self,
-        image, 
-        boxes, confidences, classes, 
-        class_names=None, 
-        color=(0, 200, 0), font_scale=0.5, thickness=2
-    ):
-        # 이미지 복사 (원본 이미지를 수정하지 않도록)
-        img_copy = image.copy()
-
-        # 이미지 색상 반전
-        img_copy = 255 - img_copy
-
-        # 박스, 점수, 클래스 순회하며 표시
-        for i in range(len(boxes)):
-            # 박스 좌표 (x_min, y_min, x_max, y_max)
-            x_min, y_min, x_max, y_max = map(int, boxes[i])
-
-            # 바운딩 박스 그리기
-            cv2.rectangle(img_copy, (x_min, y_min), (x_max, y_max), color, thickness)
-
-            # 클래스 이름과 점수
-            class_id = int(classes[i])
-            confidence = float(confidences[i])
-            label = f'{confidence:.2f}'  # 점수
-
-            # 클래스 이름이 제공되었으면 추가
-            if class_names is not None:
-                label = f'{class_names[class_id]}: {confidence:.2f}'
-
-            # 텍스트의 위치와 크기 설정
-            (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-            cv2.rectangle(img_copy, (x_min, y_min - text_height - baseline), (x_min + text_width, y_min), color, thickness=cv2.FILLED)
-            cv2.putText(img_copy, label, (x_min, y_min - baseline), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
-
-        return img_copy
-
     # 창 크기 계산
     def __preview_window_resize(self, image, window_height=900):
         # 창의 크기 조절
@@ -266,10 +340,9 @@ class SymbolDetector:
             # 이미지 미리보기
             if preview:
                 # preview 이미지 생성
-                preview_image = self.__draw_boxes_on_image(
-                    image,
-                    boxes, confidences, classes,
-                    color=(200, 0, 0)
+                preview_image = draw_boxes_on_image(
+                    255 - image,
+                    boxes, confidences, classes
                 )
                 # 이미지 크기에 맞춰 윈도우 크기 변경
                 self.__preview_window_resize(preview_image)
@@ -285,4 +358,4 @@ class SymbolDetector:
             cv2.destroyAllWindows()  # 윈도우 닫기
 
         # 결과 반환
-        return self.images, self.datas
+        return [255 - image for image in self.images], self.datas
