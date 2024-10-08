@@ -3,6 +3,7 @@ datasets/
 __pycache__/
 models/
 model_TB/
+runs/
 
 # MacOS ignore
 .DS_Store

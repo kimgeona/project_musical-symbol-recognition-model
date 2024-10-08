@@ -33,8 +33,8 @@ def shift_image(image, label):
     height = tf.cast(tf.shape(image)[1], dtype=tf.float32)
 
     # 이미지 이동할 크기 계산
-    shift_x = tf.random.uniform([], tf.cast(-0.07 * width, dtype=tf.int32), tf.cast(0.07 * width, dtype=tf.int32), dtype=tf.int32)
-    shift_y = tf.random.uniform([], tf.cast(-0.07 * height, dtype=tf.int32), tf.cast(0.07 * height, dtype=tf.int32), dtype=tf.int32)
+    shift_x = tf.random.uniform([], tf.cast(-0.25 * width, dtype=tf.int32), tf.cast(0.25 * width, dtype=tf.int32), dtype=tf.int32)
+    shift_y = tf.random.uniform([], tf.cast(-0.25 * height, dtype=tf.int32), tf.cast(0.25 * height, dtype=tf.int32), dtype=tf.int32)
 
     # 이미지 이동
     mask_zero = tf.zeros_like(image)
@@ -91,6 +91,7 @@ def shake_image(image, label):
     return image, label
 
 # 이미지 자르기
+@tf.function
 def cut_image(image, label):
     # 이미지 크기 조사
     height = tf.cast(tf.shape(image)[0], dtype=tf.float32)
@@ -129,6 +130,58 @@ def cut_image(image, label):
 
     return image, label
 
+# 이미지 자르기
+@tf.function
+def cut_image_yolo(image, label):
+    # 이미지 크기 조사
+    height = tf.cast(tf.shape(image)[0], dtype=tf.float32)
+    width = tf.cast(tf.shape(image)[1], dtype=tf.float32)
+
+    # 이미지 시작 지점 계산
+    y_start = (height - 416.0) / 2.0
+    x_start = (width - 416.0) / 2.0
+
+    # 자료형 변환
+    y_start = tf.cast(y_start, dtype=tf.int32)
+    x_start = tf.cast(x_start, dtype=tf.int32)
+
+    # 이미지 자르기
+    image = image[y_start:y_start+416, x_start:x_start+416, :]
+
+    # 데이터 형태 변경
+    label = tf.reshape(label, shape=(-1, 7))
+
+    # 데이터 분리, 레이블 데이터 좌표 수정
+    y_start = tf.cast(y_start, dtype=tf.int16)
+    x_start = tf.cast(x_start, dtype=tf.int16)
+    x1 = label[:, 0:1] - x_start
+    y1 = label[:, 1:2] - y_start
+    x2 = label[:, 2:3] - x_start
+    y2 = label[:, 3:4] - y_start
+    rx = label[:, 4:5] - x_start
+    ry = label[:, 5:6] - y_start
+    p  = label[:, 6:7]
+
+    # 하나로 합치기
+    label = tf.concat([x1, y1, x2, y2, rx, ry, p], axis=-1)
+
+    # 원래 형태로 변경
+    label = tf.reshape(label, [-1])
+
+    return image, label
+
+# 넓이 계산
+@tf.function
+def box_area(box):
+    # 각각의 좌표로 나누기
+    x1 = box[:, 0:1]
+    y1 = box[:, 1:2]
+    x2 = box[:, 2:3]
+    y2 = box[:, 3:4]
+
+    # 넓이 계산
+    return tf.abs((x2 - x1) * (y2 - y1))
+
 # 좌표 클리핑
 @tf.function
 def coords_clipping(image, label):
@@ -154,35 +207,9 @@ def coords_clipping(image, label):
 
     # 하나로 합치기
     label = tf.concat([x1, y1, x2, y2, rx, ry, p], axis=-1)
-    label_x = tf.concat([x1, x2, rx], axis=-1)
-    label_y = tf.concat([y1, y2, ry], axis=-1)
 
-    # rx 또는 ry가 이미지 범위를 벗어나는지 조사
-    mask1 = tf.reduce_any(label[:, 4:6] < 5, axis=-1, keepdims=True)        # rx, ry < 5
-    mask2 = tf.reduce_any(label[:, 4:5] > width-6, axis=-1, keepdims=True)  # rx     > width-6
-    mask3 = tf.reduce_any(label[:, 5:6] > height-6, axis=-1, keepdims=True) # ry     > height-6
-
-    # 이미지 범위를 벗어나는 이미지들 바운딩 박스 값 초기화
-    label_x = tf.where(mask1, tf.cast(img_cx, dtype=tf.int16), label_x)
-    label_x = tf.where(mask2, tf.cast(img_cx, dtype=tf.int16), label_x)
-    label_x = tf.where(mask3, tf.cast(img_cx, dtype=tf.int16), label_x)
-    label_y = tf.where(mask1, tf.cast(img_cy, dtype=tf.int16), label_y)
-    label_y = tf.where(mask2, tf.cast(img_cy, dtype=tf.int16), label_y)
-    label_y = tf.where(mask3, tf.cast(img_cy, dtype=tf.int16), label_y)
-    p       = tf.where(mask1, tf.constant(0, dtype=tf.int16),  p)
-    p       = tf.where(mask2, tf.constant(0, dtype=tf.int16),  p)
-    p       = tf.where(mask3, tf.constant(0, dtype=tf.int16),  p)
-
-    # 하나로 합치기
-    label = tf.concat([
-        label_x[:, 0:1],
-        label_y[:, 0:1],
-        label_x[:, 1:2],
-        label_y[:, 1:2],
-        label_x[:, 2:3],
-        label_y[:, 2:3],
-        p
-    ], axis=-1)
+    # 박스 너비가 없는 바운딩 박스 좌표 제거
+    tf.where(box_area(label[:, 0:4])==tf.constant(0, dtype=tf.int16), tf.constant(0, dtype=tf.int16), label)
 
     # 원래 형태로 변경
     label = tf.reshape(label, [-1])
@@ -247,5 +274,23 @@ def coords_scaling(image, label):
 
     # 원래 형태로 변경
     label = tf.reshape(label, [-1])
+
+    return image, label
+
+# 필요 없는 좌표 제거
+@tf.function
+def coords_delete(image, label):
+    # shape 변경
+    label = tf.reshape(label, shape=(-1, 7))
+
+    # 데이터 분리, 0~1 스케일링
+    cx = label[:, 0:1]
+    cy = label[:, 1:2]
+    w  = label[:, 2:3]
+    h  = label[:, 3:4]
+    p  = label[:, 6:7]
+
+    # 하나로 합치기
+    label = tf.concat([p, cx, cy, w, h], axis=-1)
 
     return image, label

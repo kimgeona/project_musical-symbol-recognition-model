@@ -87,7 +87,9 @@ def preview(image, true, pred):
 # 악상 기호 데이터셋 클래스
 class MusicalSymbolDataset:
     # 초기화
-    def __init__(self, dataset_dir=os.path.join('.', 'datasets', 'MSIG_1.1.5_note-recognition')):
+    def __init__(self, dataset_dir=os.path.join('.', 'datasets', 'MSIG_symbols')):
+        # 기존 데이터셋 주소 저장
+        self.path = dataset_dir
         # 데이터셋 주소 저장
         self.dataset_dir = [
             os.path.join(dataset_dir, 'train'),
@@ -364,3 +366,130 @@ class MusicalSymbolDataset:
 
         # 데이터셋 반환
         return self.tfds
+    
+    # 새로운 데이터셋 생성
+    def ds_to_YOLO_format(self):
+        # 이미지 레이블 클래스 변수 초기화
+        self.label_classes = [
+            'staff',
+            'clef',
+            'key',
+            'measure',
+            'rest',
+            'time',
+            'note', 
+            'accidental',
+            'articulation',
+            'dynamic',
+            'glissando',
+            'octave',
+            'ornament',
+            'repetition',
+            'tie'
+        ]
+
+        # 데이터 프레임 추출
+        df_list = []
+        for i in range(len(self.dataset_dir)):
+            picked_dfs = [self.__pick(self.img_label[i], keywords=[name]) for name in self.label_classes]
+            picked_dfs = [self.__pick(df, keywords=['-x-1', '-y-1', '-x-2', '-y-2', '-cx', '-cy', '-probability']) for df in picked_dfs]
+            for i, df in enumerate(picked_dfs):
+                df.columns = [self.label_classes[i]+col for col in df.columns]
+            picked_dfs = pd.concat(picked_dfs, axis=1)
+            df_list.append(picked_dfs)
+
+        # 이미지와 레이블 준비
+        self.img_dirs_edited = [
+            tf.convert_to_tensor(img_dir, dtype=tf.string) for img_dir in self.img_dirs
+        ]
+        self.img_label_edited = [
+            tf.convert_to_tensor(df.values, dtype=tf.int16) for df in df_list
+        ]
+
+        # 이미지 주소 데이터셋 생성
+        ds_img = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_dirs_edited]
+
+        # 이미지 레이블 데이터셋 생성
+        ds_label = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_label_edited]
+        
+        # 하나의 데이터셋 생성
+        dss = []
+        for z in zip(ds_img, ds_label):
+            dss.append(tf.data.Dataset.zip(z))
+
+        # map : 전처리 적용
+        for i, ds in enumerate(dss):
+            # 마지막 데이터셋은 전처리 건너뛰기
+            if i==len(dss)-1: 
+                # test 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.cut_image_yolo,  num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 잘라내기
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+                ds = ds.map(myfn.coords_delete, num_parallel_calls=tf.data.experimental.AUTOTUNE)       # 좌표 제거
+            else:
+                # train, validation 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.cut_image_yolo,  num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 잘라내기
+                ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
+                # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+                ds = ds.map(myfn.coords_delete, num_parallel_calls=tf.data.experimental.AUTOTUNE)       # 좌표 제거
+
+            # 전처리된 데이터셋 저장
+            dss[i] = ds
+
+        # cache
+        for i, ds in enumerate(dss):
+            ds = ds.cache() # 캐싱
+            dss[i] = ds
+
+        # # shuffle
+        # for i, ds in enumerate(dss):
+        #     ds = ds.shuffle(buffer_size=len(self.img_dirs[i]))  # 셔플
+        #     dss[i] = ds
+
+        # prefetch
+        for i, ds in enumerate(dss):
+            ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+            dss[i] = ds
+
+        # 새로운 데이터셋 주소 생성
+        new_path = list(os.path.split(self.path))
+        new_path = new_path[:-1] + ['TFDS_' + new_path[-1].split('_')[-1]]
+        new_path = os.path.join(*new_path)
+
+        # 저장
+        for i, ds_name in enumerate(['train', 'validation', 'test']):
+            # 데이터셋 이름 생성
+            ds_path = os.path.join(new_path, ds_name)
+            os.makedirs(ds_path, exist_ok=True)
+            # 데이터셋에 이미지, 레이블 저장
+            for count, (image, label) in enumerate(dss[i]):
+                # 이미지, 레이블 주소 생성
+                image_path = os.path.join(ds_path, f'{count}.png')
+                label_path = os.path.join(ds_path, f'{count}.txt')
+                # 이미지 저장
+                scaled_image = tf.clip_by_value(image * 255.0, 0.0, 255.0)
+                encoded_image = tf.image.encode_png(tf.cast(scaled_image, tf.uint8))
+                tf.io.write_file(image_path, encoded_image)
+                # 레이블 저장
+                strs = []
+                for index in tf.range(label.shape[0]):
+                    # 해당 인덱스의 데이터 가져오기
+                    data = label[index].numpy()
+                    # probability가 1.0인 경우 확인
+                    if data[0] == 1.0:
+                        # cx, cy, w, h 값을 가져와서 문자열 생성
+                        cx, cy, w, h = data[1:]
+                        strs.append(f'{index.numpy()} {cx} {cy} {w} {h}')
+                with open(label_path, 'w') as f:
+                    f.write('\n'.join(strs))
+
