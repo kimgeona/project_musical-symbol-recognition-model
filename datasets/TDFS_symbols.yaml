@@ -1,0 +1,27 @@
+# 데이터셋 경로
+path: ./TFDS_symbols
+train: train
+val: validation
+test: test
+
+# 클래스 수
+nc: 15
+
+# 클래스 이름
+names: [
+  'staff',
+  'clef',
+  'key',
+  'measure',
+  'rest',
+  'time',
+  'note', 
+  'accidental',
+  'articulation',
+  'dynamic',
+  'glissando',
+  'octave',
+  'ornament',
+  'repetition',
+  'tie'
+]
