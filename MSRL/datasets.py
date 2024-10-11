@@ -1,5 +1,6 @@
 # 필요한 패키지
 import os                           # 운영체제 관련
+import shutil
 import tensorflow as tf             # 텐서플로
 import pandas as pd                 # 판다스
 import matplotlib.pyplot as plt     # 그래프 도구
@@ -87,34 +88,26 @@ def preview(image, true, pred):
 # 악상 기호 데이터셋 클래스
 class MusicalSymbolDataset:
     # 초기화
-    def __init__(self, dataset_dir=os.path.join('.', 'datasets', 'MSIG_symbols')):
+    def __init__(self, dataset_dir):
         # 기존 데이터셋 주소 저장
         self.path = dataset_dir
-        # 데이터셋 주소 저장
-        self.dataset_dir = [
-            os.path.join(dataset_dir, 'train'),
-            os.path.join(dataset_dir, 'validation'),
-            os.path.join(dataset_dir, 'test')
-        ]
-        # 데이터셋 레이블 주소 저장
-        self.csv_dir = [
-            os.path.join(self.dataset_dir[0], 'label.csv'),
-            os.path.join(self.dataset_dir[1], 'label.csv'),
-            os.path.join(self.dataset_dir[2], 'label.csv')
+        # csv 주소 생성
+        csv_dir = [
+            os.path.join(self.path, 'train', 'label.csv'),
+            os.path.join(self.path, 'validation', 'label.csv'),
+            os.path.join(self.path, 'test', 'label.csv')
         ]
         # 이미지 주소, 이미지 레이블
         self.img_dirs = []
-        self.img_label = [pd.read_csv(dir) for dir in self.csv_dir]
+        self.img_label = [pd.read_csv(dir) for dir in csv_dir]
         # 이미지 레이블 불러오기
-        for i in range(len(self.dataset_dir)):
-            self.img_label[i]['name_int'] = self.img_label[i]['name'].str.extract('(\d+)').astype(int)  # CSV 파일 불러오기
-            self.img_label[i] = self.img_label[i].sort_values('name_int')                               # name 열을 정수값으로 추출
-            self.img_label[i].reset_index(drop=True, inplace=True)                                      # 정수값을 기준으로 정렬
-            self.img_dirs.append(self.img_label[i]['name'].to_list())                                   # 현재 데이터 순서로 인덱스 초기화
-            self.img_label[i] = self.img_label[i].drop(columns=['name', 'name_int'])                    # 필요 없는 name, name_int 열 제거
+        for i in range(len(3)):
+            self.img_dirs.append(self.img_label[i]['name'].to_list())       # 이미지 주소 저장
+            self.img_label[i] = self.img_label[i].drop(columns=['name'])    # 이미지 레이블 저장
         # 이미지 주소 생성
-        for i in range(len(self.dataset_dir)):
-            self.img_dirs[i] = [os.path.join(self.dataset_dir[i], name) for name in self.img_dirs[i]]
+        self.img_dirs[0] = [os.path.join(self.path, 'train', name)      for name in self.img_dirs[0]]
+        self.img_dirs[1] = [os.path.join(self.path, 'validation', name) for name in self.img_dirs[1]]
+        self.img_dirs[2] = [os.path.join(self.path, 'test', name)       for name in self.img_dirs[2]]
 
     # 데이터 프레임 추출
     def __pick(self, dataframe, keywords):
@@ -475,7 +468,9 @@ class MusicalSymbolDataset:
             for count, (image, label) in enumerate(dss[i]):
                 # 이미지, 레이블 주소 생성
                 image_path = os.path.join(ds_path, f'{count}.png')
+                image_path = image_path.encode('utf-8')
                 label_path = os.path.join(ds_path, f'{count}.txt')
+                label_path = label_path.encode('utf-8')
                 # 이미지 저장
                 scaled_image = tf.clip_by_value(image * 255.0, 0.0, 255.0)
                 encoded_image = tf.image.encode_png(tf.cast(scaled_image, tf.uint8))
@@ -493,3 +488,412 @@ class MusicalSymbolDataset:
                 with open(label_path, 'w') as f:
                     f.write('\n'.join(strs))
 
+     # 새로운 데이터셋 생성
+    
+    def save_as_YOLO11(self):
+        # 이미지 레이블 목록
+        self.label_classes = [
+            'staff',
+            'clef',
+            'key',
+            'measure',
+            'rest',
+            'time',
+            'note', 
+            'accidental',
+            'articulation',
+            'dynamic',
+            'glissando',
+            'octave',
+            'ornament',
+            'repetition',
+            'tie'
+        ]
+
+        # 데이터 프레임 추출
+        df_list = []
+        for i in range(len(self.dataset_dir)):
+            picked_dfs = [self.__pick(self.img_label[i], keywords=[name]) for name in self.label_classes]
+            picked_dfs = [self.__pick(df, keywords=['-x-1', '-y-1', '-x-2', '-y-2', '-cx', '-cy', '-probability']) for df in picked_dfs]
+            for i, df in enumerate(picked_dfs):
+                df.columns = [self.label_classes[i]+col for col in df.columns]
+            picked_dfs = pd.concat(picked_dfs, axis=1)
+            df_list.append(picked_dfs)
+
+        # 이미지와 레이블 준비
+        self.img_dirs_edited = [
+            tf.convert_to_tensor(img_dir, dtype=tf.string) for img_dir in self.img_dirs
+        ]
+        self.img_label_edited = [
+            tf.convert_to_tensor(df.values, dtype=tf.int16) for df in df_list
+        ]
+
+        # 이미지 주소 데이터셋 생성
+        ds_img = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_dirs_edited]
+
+        # 이미지 레이블 데이터셋 생성
+        ds_label = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_label_edited]
+        
+        # 하나의 데이터셋 생성
+        dss = []
+        for z in zip(ds_img, ds_label):
+            dss.append(tf.data.Dataset.zip(z))
+
+        # map : 전처리 적용
+        for i, ds in enumerate(dss):
+            # 마지막 데이터셋은 전처리 건너뛰기
+            if i==len(dss)-1: 
+                # test 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.cut_image_yolo,  num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 잘라내기
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+                ds = ds.map(myfn.coords_delete, num_parallel_calls=tf.data.experimental.AUTOTUNE)       # 좌표 제거
+            else:
+                # train, validation 전처리
+                ds = ds.map(myfn.load_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)          # 이미지 불러오기
+                #ds = ds.map(myfn.scale_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 확대 및 축소
+                ds = ds.map(myfn.shift_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 이동
+                ds = ds.map(myfn.cut_image_yolo,  num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 이미지 잘라내기
+                ds = ds.map(myfn.add_noise, num_parallel_calls=tf.data.experimental.AUTOTUNE)           # 이미지 잡음
+                # ds = ds.map(myfn.shake_image, num_parallel_calls=tf.data.experimental.AUTOTUNE)         # 이미지 진동
+                ds = ds.map(myfn.coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE)     # 좌표 잘라내기
+                ds = ds.map(myfn.coords_convert, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 변환
+                ds = ds.map(myfn.coords_scaling, num_parallel_calls=tf.data.experimental.AUTOTUNE)      # 좌표 스케일링
+                ds = ds.map(myfn.coords_delete, num_parallel_calls=tf.data.experimental.AUTOTUNE)       # 좌표 제거
+
+            # 전처리된 데이터셋 저장
+            dss[i] = ds
+
+        # cache
+        for i, ds in enumerate(dss):
+            ds = ds.cache() # 캐싱
+            dss[i] = ds
+
+        # # shuffle
+        # for i, ds in enumerate(dss):
+        #     ds = ds.shuffle(buffer_size=len(self.img_dirs[i]))  # 셔플
+        #     dss[i] = ds
+
+        # prefetch
+        for i, ds in enumerate(dss):
+            ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+            dss[i] = ds
+
+        # 새로운 데이터셋 주소 생성
+        new_path = list(os.path.split(self.path))
+        new_path = new_path[:-1] + ['TFDS_' + new_path[-1].split('_')[-1]]
+        new_path = os.path.join(*new_path)
+
+        # 저장
+        for i, ds_name in enumerate(['train', 'validation', 'test']):
+            # 데이터셋 이름 생성
+            ds_path = os.path.join(new_path, ds_name)
+            os.makedirs(ds_path, exist_ok=True)
+            # 데이터셋에 이미지, 레이블 저장
+            for count, (image, label) in enumerate(dss[i]):
+                # 이미지, 레이블 주소 생성
+                image_path = os.path.join(ds_path, f'{count}.png')
+                image_path = image_path.encode('utf-8')
+                label_path = os.path.join(ds_path, f'{count}.txt')
+                label_path = label_path.encode('utf-8')
+                # 이미지 저장
+                scaled_image = tf.clip_by_value(image * 255.0, 0.0, 255.0)
+                encoded_image = tf.image.encode_png(tf.cast(scaled_image, tf.uint8))
+                tf.io.write_file(image_path, encoded_image)
+                # 레이블 저장
+                strs = []
+                for index in tf.range(label.shape[0]):
+                    # 해당 인덱스의 데이터 가져오기
+                    data = label[index].numpy()
+                    # probability가 1.0인 경우 확인
+                    if data[0] == 1.0:
+                        # cx, cy, w, h 값을 가져와서 문자열 생성
+                        cx, cy, w, h = data[1:]
+                        strs.append(f'{index.numpy()} {cx} {cy} {w} {h}')
+                with open(label_path, 'w') as f:
+                    f.write('\n'.join(strs))
+
+# MSIG 데이터셋을 YOLOv11 데이터셋으로 변환해주는 클래스
+class DatasetConvert:
+    def __init__(self, MSIG_dataset_dir):
+        # 기존 데이터셋 주소 저장
+        self.path = MSIG_dataset_dir
+        print('* 입력된 데이터셋')
+        print('- {}'.format(self.path))
+        print('')
+
+        # 생성될 데이터세 주소 생성
+        self.newPath = list(os.path.split(self.path))
+        self.newPath = self.newPath[:-1] + ['TFDS_' + self.newPath[-1][5:]]
+        self.newPath = os.path.join(*self.newPath)
+        print('* 생성될 데이터셋')
+        print('- {}'.format(self.newPath))
+        print('')
+
+        # 존재하는 디렉토리이면 제거
+        if os.path.exists(self.newPath):
+            shutil.rmtree(self.newPath)
+            
+        # 새로운 데이터셋 폴더 생성
+        os.makedirs(os.path.join(self.newPath, 'train'))
+        os.makedirs(os.path.join(self.newPath, 'validation'))
+        os.makedirs(os.path.join(self.newPath, 'test'))
+
+        print('* 새로운 데이터셋을 생성합니다.')
+        # csv 주소 생성
+        csv_dir = [
+            os.path.join(self.path, 'train', 'label.csv'),
+            os.path.join(self.path, 'validation', 'label.csv'),
+            os.path.join(self.path, 'test', 'label.csv')
+        ]
+
+        # 이미지 주소, 이미지 레이블
+        print('- csv 파일을 불러옵니다.')
+        self.img_dirs = []
+        self.img_labels = [pd.read_csv(dir) for dir in csv_dir]
+
+        # 이미지 레이블 불러오기
+        for i in range(3):
+            self.img_dirs.append(self.img_labels[i]['name'].to_list())      # 이미지 주소 저장
+            self.img_labels[i] = self.img_labels[i].drop(columns=['name'])  # 이미지 레이블 저장
+
+        # 이미지 주소 생성
+        self.img_dirs[0] = [os.path.join(self.path, 'train', name)      for name in self.img_dirs[0]]
+        self.img_dirs[1] = [os.path.join(self.path, 'validation', name) for name in self.img_dirs[1]]
+        self.img_dirs[2] = [os.path.join(self.path, 'test', name)       for name in self.img_dirs[2]]
+
+        # 이미지 레이블 목록
+        self.label_class = [
+            'staff',
+            'clef',
+            'key',
+            'measure',
+            'rest',
+            'time',
+            'note', 
+            'accidental',
+            'articulation',
+            'dynamic',
+            'glissando',
+            'octave',
+            'ornament',
+            'repetition',
+            'tie'
+        ]
+
+        # 데이터 프레임 추출
+        print('- csv 데이터를 추출합니다.')
+        df_list = []
+        for i in range(3):
+            picked_dfs = [self.__pick(self.img_labels[i], keywords=[name]) for name in self.label_class]
+            picked_dfs = [self.__pick(df, keywords=['-x-1', '-y-1', '-x-2', '-y-2', '-cx', '-cy', '-probability']) for df in picked_dfs]
+            for i, df in enumerate(picked_dfs):
+                df.columns = [self.label_class[i]+col for col in df.columns]
+            picked_dfs = pd.concat(picked_dfs, axis=1)
+            df_list.append(picked_dfs)
+
+        # 이미지와 레이블 준비
+        self.img_dirs_tfs = [
+            tf.convert_to_tensor(img_dir, dtype=tf.string) for img_dir in self.img_dirs
+        ]
+        self.img_label_tfs = [
+            tf.convert_to_tensor(df.values, dtype=tf.int16) for df in df_list
+        ]
+
+        # 이미지 주소 텐서플로우 데이터셋 생성
+        img_dirs_tfdss = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_dirs_tfs]
+
+        # 이미지 레이블 텐서플로우 데이터셋 생성
+        img_label_tfdss = [tf.data.Dataset.from_tensor_slices(t) for t in self.img_label_tfs]
+        
+        # 텐서플로우 데이터셋 생성
+        print('- 텐서플로우 데이터셋을 생성합니다.')
+        self.tfdss = []
+        for z in zip(img_dirs_tfdss, img_label_tfdss):
+            self.tfdss.append(tf.data.Dataset.zip(z))
+
+        # map
+        for i, tfds in enumerate(self.tfdss):
+            # train, validation
+            if i<2:
+                tfds = tfds.map(myfn.DC_load_image,      num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 불러오기
+                tfds = tfds.map(myfn.DC_image_shift,     num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 이동
+                tfds = tfds.map(myfn.DC_image_cut,       num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 잘라내기
+                tfds = tfds.map(myfn.DC_image_noise,     num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 잡음
+                tfds = tfds.map(myfn.DC_coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 잘라내기
+                tfds = tfds.map(myfn.DC_coords_convert,  num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 변환
+                tfds = tfds.map(myfn.DC_coords_scaling,  num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 스케일링
+                tfds = tfds.map(myfn.DC_coords_delete,   num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 제거
+            # test
+            else:
+                tfds = tfds.map(myfn.DC_load_image,      num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 불러오기
+                tfds = tfds.map(myfn.DC_image_cut,       num_parallel_calls=tf.data.experimental.AUTOTUNE) # 이미지 잘라내기
+                tfds = tfds.map(myfn.DC_coords_clipping, num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 잘라내기
+                tfds = tfds.map(myfn.DC_coords_convert,  num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 변환
+                tfds = tfds.map(myfn.DC_coords_scaling,  num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 스케일링
+                tfds = tfds.map(myfn.DC_coords_delete,   num_parallel_calls=tf.data.experimental.AUTOTUNE) # 좌표 제거
+            # 전처리된 데이터셋 저장
+            self.tfdss[i] = tfds
+
+        # NOTE: cash, prefetch 를 사용하면 커널 충돌이 일어남. 아마도 메모리 부족으로 생기는 것으로 예상됨.
+        # cash
+        # for i, tfds in enumerate(self.tfdss):
+        #     tfds = tfds.cache()
+        #     self.tfdss[i] = tfds
+
+        # # shuffle
+        # for i, ds in enumerate(dss):
+        #     ds = ds.shuffle(buffer_size=len(self.img_dirs[i]))  # 셔플
+        #     dss[i] = ds
+
+        # # prefetch
+        # for i, tfds in enumerate(self.tfdss):
+        #     tfds = tfds.prefetch(tf.data.experimental.AUTOTUNE)
+        #     self.tfdss[i] = tfds
+
+        # 저장
+        print('- 이미지와 레이블을 저장합니다.')
+        for tfds in self.tfdss:
+            for dir, image, label in tfds:
+                # dir : 이미지와 레이블을 저장할 주소 생성
+                image_path = dir.numpy().decode('utf-8')
+                image_path = list(os.path.split(image_path))
+                image_path[0] = image_path[0].replace(self.path, self.newPath)
+                image_path = os.path.join(*image_path)
+                label_path = list(os.path.split(image_path))
+                label_path[1] = label_path[1].replace('.png', '.txt')
+                label_path = os.path.join(*label_path)
+                # image : 이미지 저장
+                scaled_image = tf.clip_by_value(image * 255.0, 0.0, 255.0)
+                encoded_image = tf.image.encode_png(tf.cast(scaled_image, tf.uint8))
+                tf.io.write_file(image_path, encoded_image)
+                # label : 레이블 저장
+                strs = []
+                for index in tf.range(label.shape[0]):
+                    # 해당 인덱스의 데이터 가져오기
+                    data = label[index].numpy()
+                    # probability가 1.0인 경우 확인
+                    if data[0] == 1.0:
+                        # cx, cy, w, h 값을 가져와서 문자열 생성
+                        cx, cy, w, h = data[1:]
+                        strs.append(f'{index.numpy()} {cx} {cy} {w} {h}')
+                with open(label_path, 'w') as f:
+                    f.write('\n'.join(strs))
+                # 정보 출력
+                # print(f"Directory: {image_path}")
+                # print(f"Image shape: {image.shape}")  # 이미지 텐서 크기 출력
+                # print(f"Label shape: {label.shape}")  # 레이블 텐서 크기 출력
+        print('- 생성을 완료하였습니다.')
+        
+
+    # 데이터 프레임 추출
+    def __pick(self, dataframe, keywords):
+        # 데이터 프레임 생성
+        df = pd.DataFrame()
+        # 데이터 프레임 구성
+        for word in keywords:
+            # Dataframe 에서 kewords 단어를 포함하는 열 이름 추출
+            cols = [col for col in dataframe.columns if word in col]
+            # keywords 단어들을 중심으로 열들 하나로 묶어 Dataframe에 저장
+            if (len(keywords) > 1):
+                for col in cols:
+                    if word in df:  df[word.strip()] = df[word] | dataframe[col]
+                    else:           df[word.strip()] = dataframe[col]
+            # keywords 단어가 들어간 열들만 Dataframe 으로 만들기
+            else:
+                if cols:
+                    df = dataframe[cols].copy()
+                    df.columns = [col.strip() for col in cols]
+        # 생성된 데이터 프레임 반환
+        return df
+
+# MSIG 데이터셋을 하나의 데이터셋으로 합쳐주는 클래스
+class DatasetAssemble:
+    def __init__(self, dataset_dirs, new_name):
+        # 새로운 데이터셋 경로 계산
+        new_dataset_dirs = os.path.join(os.path.split(dataset_dirs[0])[0], new_name)
+
+        # 데이터셋 정보 출력
+        print(f'* 합칠 데이터셋')
+        for i, dir in enumerate(dataset_dirs):
+            print(f': {dir}')
+        print()
+        print(f'* 생성될 데이터셋')
+        print(f': {new_dataset_dirs}')
+        print()
+
+        # 존재하는 디렉토리이면 제거
+        if os.path.exists(new_dataset_dirs):
+            shutil.rmtree(new_dataset_dirs)
+            
+        # 새로운 데이터셋 폴더 생성
+        os.makedirs(os.path.join(new_dataset_dirs, 'train'))
+        os.makedirs(os.path.join(new_dataset_dirs, 'validation'))
+        os.makedirs(os.path.join(new_dataset_dirs, 'test'))
+
+        #
+        csv_train = []
+        csv_validation = []
+        csv_test = []
+
+        # csv 파일 불러오기 및 이미지 복사
+        print(f'* 데이터셋 생성을 시작합니다')
+        for dataset_dir in dataset_dirs:
+            # csv 파일 읽기
+            train_df = pd.read_csv(os.path.join(dataset_dir, 'train', 'label.csv'))
+            valid_df = pd.read_csv(os.path.join(dataset_dir, 'validation', 'label.csv'))
+            test_df  = pd.read_csv(os.path.join(dataset_dir, 'test', 'label.csv'))
+            # csv 파일에 명시되어 있는 이미지들 조사
+            train_img_dirs = [os.path.join(dataset_dir, 'train', dir) for dir in train_df['name'].tolist()]
+            valid_img_dirs = [os.path.join(dataset_dir, 'validation', dir) for dir in valid_df['name'].tolist()]
+            test_img_dirs  = [os.path.join(dataset_dir, 'test', dir) for dir in test_df['name'].tolist()]
+            # 이미지 복사
+            print(f'- {dataset_dir} 폴더의 이미지를 복사합니다.')
+            for dir in train_img_dirs:
+                shutil.copyfile(dir, os.path.join(
+                    new_dataset_dirs,                                               # newDatasetName
+                    'train',                                                        # train
+                    os.path.split(dataset_dir)[-1] + '-' + os.path.split(dir)[-1]   # preDatasetName-0.png
+                ))
+            for dir in valid_img_dirs:
+                shutil.copyfile(dir, os.path.join(
+                    new_dataset_dirs,                                               # newDatasetName
+                    'validation',                                                   # validation
+                    os.path.split(dataset_dir)[-1] + '-' + os.path.split(dir)[-1]   # preDatasetName-0.png
+                ))
+            for dir in test_img_dirs:
+                shutil.copyfile(dir, os.path.join(
+                    new_dataset_dirs,                                               # newDatasetName
+                    'test',                                                         # test
+                    os.path.split(dataset_dir)[-1] + '-' + os.path.split(dir)[-1]   # preDatasetName-0.png
+                ))
+            # name 열 이름 수정
+            train_df['name'] = os.path.split(dataset_dir)[-1] + '-' + train_df['name']
+            valid_df['name'] = os.path.split(dataset_dir)[-1] + '-' + valid_df['name']
+            test_df['name']  = os.path.split(dataset_dir)[-1] + '-' + test_df['name']
+            # csv 파일 추가
+            csv_train.append(train_df)
+            csv_validation.append(valid_df)
+            csv_test.append(test_df)
+
+        # 데이터 프레임 하나로 합치기
+        print('- CSV 파일들을 하나로 합칩니다.')
+        df_train       = pd.concat(csv_train, ignore_index=True, sort=False).fillna(0)
+        df_validation  = pd.concat(csv_validation, ignore_index=True, sort=False).fillna(0)
+        df_test        = pd.concat(csv_test, ignore_index=True, sort=False).fillna(0)
+        df_train[df_train.columns.difference(['name'])]           = df_train[df_train.columns.difference(['name'])].astype(int)
+        df_validation[df_validation.columns.difference(['name'])] = df_validation[df_validation.columns.difference(['name'])].astype(int)
+        df_test[df_test.columns.difference(['name'])]             = df_test[df_test.columns.difference(['name'])].astype(int)
+
+        # csv 파일로 저장하기
+        print('- CSV 파일들을 저장합니다.')
+        df_train.to_csv(os.path.join(new_dataset_dirs, 'train', 'label.csv'), index=False)
+        df_validation.to_csv(os.path.join(new_dataset_dirs, 'validation', 'label.csv'), index=False)
+        df_test.to_csv(os.path.join(new_dataset_dirs, 'test', 'label.csv'), index=False)
+
+        #
+        print('- 생성을 완료하였습니다.')
