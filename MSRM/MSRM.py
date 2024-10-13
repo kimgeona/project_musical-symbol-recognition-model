@@ -117,6 +117,115 @@ def draw_boxes_on_image(
     return img_copy
 
 
+
+# 교집합 영역의 크기를 계산해주는 함수
+def box_intersection_area(box1, box2):
+    # 좌표값 추출
+    b1x1 = box1[:, 0:1]
+    b1y1 = box1[:, 1:2]
+    b1x2 = box1[:, 2:3]
+    b1y2 = box1[:, 3:4]
+    b2x1 = box2[:, 0:1]
+    b2y1 = box2[:, 1:2]
+    b2x2 = box2[:, 2:3]
+    b2y2 = box2[:, 3:4]
+
+    # 교집합 영역의 너비와 높이 계산
+    inner_width = torch.clamp(torch.minimum(b1x2, b2x2) - torch.maximum(b1x1, b2x1), min=0)
+    inner_height = torch.clamp(torch.minimum(b1y2, b2y2) - torch.maximum(b1y1, b2y1), min=0)
+
+    # 교집합 넓이 계산
+    intersection_area = inner_width * inner_height
+
+    # 교집합 넓이 반환
+    return intersection_area
+
+# 박스들의 합집합 좌표를 반환해주는 함수
+def union_boxes(boxes):
+
+    # 좌표값 추출
+    x1 = boxes[:, 0:1]
+    y1 = boxes[:, 1:2]
+    x2 = boxes[:, 2:3]
+    y2 = boxes[:, 3:4]
+
+    # 합집합 좌표 계산
+    x1_min = torch.min(x1, dim=0, keepdim=True)[0]
+    y1_min = torch.min(y1, dim=0, keepdim=True)[0]
+    x2_max = torch.max(x2, dim=0, keepdim=True)[0]
+    y2_max = torch.max(y2, dim=0, keepdim=True)[0]
+
+    # 하나로 연결
+    union_box = torch.cat((x1_min, y1_min, x2_max, y2_max), dim=-1)
+
+    # 합집합 좌표 반환
+    return union_box
+
+# 확률 값의 평균을 구함
+def union_confidences(confidences):
+    return torch.mean(confidences, dim=0, keepdim=True)
+
+# 첫번째 요소를 클래스 번호로 지정
+def union_classes(classes):
+    # TODO: 나중에 필요하다면 가장 면적이 넓은 것을 기준으로 클래스를 정하도록 코드 수정
+    #return classes[0:1]
+    return classes.mode()[0].unsqueeze(0)
+
+# 두 박스가 교집합이 있으면 이 둘을 합쳐서 하나의 박스로 만들어주는 함수
+def merge_bounding_boxes(boxes, confidences, classes):
+    # 디바이스 조사
+    device = boxes.device
+
+    # 합집합 완성된 좌표들
+    merged_boxes = []
+    merged_confidences = []
+    merged_classes = []
+
+    # 박스를 더이상 합칠 수 있는게 없을 때 까지 반복
+    while boxes.shape[0] > 0:
+
+        # 교집합 여부 조사
+        mask = (box_intersection_area(boxes[:1], boxes) > 0).reshape(-1)    # 교집합이 있는 것들 마스크
+        mask_not = ~mask.reshape(-1)                                        # 교집합이 없는 것들 마스크
+
+        # 교집합 박스 갯수 계산
+        count = torch.sum(mask)
+
+        if count == 1:
+            # 교집합이 없는 경우 완성으로 빼기
+            merged_boxes.append(boxes[:1])
+            merged_confidences.append(confidences[:1])
+            merged_classes.append(classes[:1])
+
+            # 업데이트
+            boxes = boxes[1:]
+            confidences = confidences[1:]
+            classes = classes[1:]
+        else:
+            # 박스 병합 작업
+            curr_box = union_boxes(boxes[mask])
+            curr_conf = union_confidences(confidences[mask])
+            curr_class = union_classes(classes[mask])
+
+            # 업데이트
+            boxes       = torch.cat((curr_box,   boxes[mask_not]),       dim=0)
+            confidences = torch.cat((curr_conf,  confidences[mask_not]), dim=0)
+            classes     = torch.cat((curr_class, classes[mask_not]),     dim=0)
+
+    # 하나의 텐서로 만들기
+    if merged_boxes:
+        merged_boxes        = torch.cat(merged_boxes, dim=0)
+        merged_confidences  = torch.cat(merged_confidences, dim=0)
+        merged_classes      = torch.cat(merged_classes, dim=0)
+    else:
+        merged_boxes = torch.tensor([], device=device)
+        merged_confidences = torch.tensor([], device=device)
+        merged_classes = torch.tensor([], device=device)
+
+    return merged_boxes, merged_confidences, merged_classes
+
+
+
 # 악상기호 대분류 모델
 class SymbolDetector:
     def __init__(
@@ -252,14 +361,50 @@ class SymbolDetector:
             masked_confidences = confidences[mask]
             masked_classes = classes[mask]
 
-            # NMS 적용
-            # TODO: 특정 인덱스(ex: staff)는 겹치면 그냥 하나로 만들어버리기, 나머지는 NMS 적용
-            nms_indices = ops.nms(masked_boxes, masked_confidences, self.note_iou_threshold) # iou_threshold=0.8 이상이면 합침
+            # 0:staff, 1:clef, 2:key, 3:measure, 5:time
+            if class_id==0 or class_id==1 or class_id==2 or class_id==3 or class_id==5:
+                # 바운딩 박스가 서로 겹치면 합치기
+                new_boxes, new_confidences, new_classes = merge_bounding_boxes(
+                    masked_boxes, masked_confidences, masked_classes
+                )
 
-            # 최종 결과에 남은 박스 추가
-            result_boxes.append(masked_boxes[nms_indices])
-            result_confidences.append(masked_confidences[nms_indices])
-            result_classes.append(masked_classes[nms_indices])
+                # 최종 결과에 남은 박스 추가
+                result_boxes.append(new_boxes)
+                result_confidences.append(new_confidences)
+                result_classes.append(new_classes)
+
+            # 13:repetition
+            elif class_id==13:
+                # 데이터셋에서 repetition-middle 이미지..? 이거 제외 시키기.
+                pass
+
+            # 14:tie, 10:glissando, 11:octave
+            elif class_id==14 or class_id==10 or class_id==11:
+                # 바운딩 박스의 confidences 가 0.9 이상이때만 통과시키도록
+                conf_indices = masked_confidences > 0.8
+                masked_boxes = masked_boxes[conf_indices]
+                masked_confidences = masked_confidences[conf_indices]
+                masked_classes = masked_classes[conf_indices]
+
+                # 바운딩 박스가 서로 겹치면 합치기
+                new_boxes, new_confidences, new_classes = merge_bounding_boxes(
+                    masked_boxes, masked_confidences, masked_classes
+                )
+
+                # 최종 결과에 남은 박스 추가
+                result_boxes.append(new_boxes)
+                result_confidences.append(new_confidences)
+                result_classes.append(new_classes)
+
+            # 4:rest, 6:note, 7:accidental, 8:articulation, 9:dynamic, 12:ornament
+            else:
+                # NMS 적용
+                nms_indices = ops.nms(masked_boxes, masked_confidences, self.note_iou_threshold) # iou_threshold=0.8 이상이면 합침
+
+                # 최종 결과에 남은 박스 추가
+                result_boxes.append(masked_boxes[nms_indices])
+                result_confidences.append(masked_confidences[nms_indices])
+                result_classes.append(masked_classes[nms_indices])
 
         # 각 클래스마다 추출된 NMS 결과를 하나의 텐서로 결합
         if result_boxes:
