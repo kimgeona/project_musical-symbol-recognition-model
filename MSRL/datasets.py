@@ -674,7 +674,7 @@ class DatasetConvert:
             'measure',
             'rest',
             'time',
-            'note', 
+            'note-center', 
             'accidental',
             'articulation',
             'dynamic',
@@ -682,7 +682,9 @@ class DatasetConvert:
             'octave',
             'ornament',
             'repetition',
-            'tie'
+            'tie',
+            'note-left',
+            'note-right'
         ]
 
         # 데이터 프레임 추출
@@ -780,7 +782,11 @@ class DatasetConvert:
                     if data[0] == 1.0:
                         # cx, cy, w, h 값을 가져와서 문자열 생성
                         cx, cy, w, h = data[1:]
-                        strs.append(f'{index.numpy()} {cx} {cy} {w} {h}')
+                        # 15:note-left, 16:note-right -> 6:note-center 로 통일
+                        class_num = index.numpy().item()
+                        if class_num==15 or class_num==16:
+                            class_num = 6
+                        strs.append(f'{class_num} {cx} {cy} {w} {h}')
                 with open(label_path, 'w') as f:
                     f.write('\n'.join(strs))
                 # 정보 출력
