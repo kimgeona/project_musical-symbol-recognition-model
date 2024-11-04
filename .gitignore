@@ -5,6 +5,11 @@ models/
 model_TB/
 runs/
 
+# files
+*.mp4
+*.png
+*.zip
+
 # MacOS ignore
 .DS_Store
 
