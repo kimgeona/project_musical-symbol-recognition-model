@@ -249,6 +249,9 @@ class SymbolDetector:
 
         # 이미지들 불러오기
         self.images = self.__load_images(image_dirs)
+
+        # 인식한 이미지 갯수 카운트
+        self.recognition_count = 0
                 
     # 이미지들 불러오기
     def __load_images(self, dirs):
@@ -269,7 +272,7 @@ class SymbolDetector:
         return images
 
     # 하나의 이미지에 대한 예측 수행
-    def __predict(self, image, preview):
+    def __predict(self, image, preview, save):
         # 이미지 높이 계산
         height, width, channels = image.shape
 
@@ -330,6 +333,26 @@ class SymbolDetector:
                     # preview 미리보기
                     cv2.imshow('Preview Image', preview_image)
                     cv2.waitKey(1)
+                
+                # 영상으로 저장
+                if save:
+                    # 하나의 텐서로 만들기
+                    if boxes:
+                        boxes_tmp = torch.cat(boxes)
+                        confidences_tmp = torch.cat(confidences)
+                        classes_tmp = torch.cat(classes)
+                    else:
+                        boxes_tmp = torch.tensor([])
+                        confidences_tmp = torch.tensor([])
+                        classes_tmp = torch.tensor([])
+                    # preview 이미지 생성
+                    preview_image = draw_boxes_on_image(
+                        255 - image,
+                        boxes_tmp, confidences_tmp, classes_tmp
+                    )
+                    # 프레임 영상에 저장
+                    self.output_video.write(preview_image)
+                    self.output_video.write(preview_image)
 
         # 각 이미지마다 인식된 박스 데이터 결과를 하나의 텐서로 결합
         if boxes:
@@ -340,6 +363,9 @@ class SymbolDetector:
             boxes = torch.tensor([])
             confidences = torch.tensor([])
             classes = torch.tensor([])
+
+        # 인식한 악보 갯수 카운트 증가
+        self.recognition_count += 1
         
         # 검출된 데이터들 반환
         return boxes, confidences, classes
@@ -463,19 +489,24 @@ class SymbolDetector:
         return resized_image
 
     # 객체 인식 수행
-    def detact(self, preview=False):
+    def detact(self, preview=False, save=False):
         # 이미지들 에서 탐지된 객체
         self.datas = []
 
         # 객체 탐지 시작
         for image in self.images:
+            # 영상 객체 생성
+            if save:
+                height, width, channels = image.shape
+                fourcc = cv2.VideoWriter_fourcc(*'X264')
+                self.output_video = cv2.VideoWriter('video_' + str(self.recognition_count) + '.mp4', fourcc, 60, (width, height))
             # 이미지 미리보기
             if preview:
                 self.__preview_window_resize(image) # 윈도우 크기 변경
                 cv2.imshow('Preview Image', self.__resize_image(255 - image))
                 cv2.waitKey(1)
             # 데이터 검출
-            boxes, confidences, classes = self.__predict(image, preview)
+            boxes, confidences, classes = self.__predict(image, preview, save)
             # 데이터 결합
             boxes, confidences, classes = self.__assemble(boxes, confidences, classes)
             # 데이터 검사
@@ -496,6 +527,19 @@ class SymbolDetector:
                 # preview 미리보기
                 cv2.imshow('Preview Image', preview_image)
                 cv2.waitKey(1000)
+            # 영상으로 저장
+            if save:
+                # preview 이미지 생성
+                preview_image = draw_boxes_on_image(
+                    255 - image,
+                    boxes, confidences, classes
+                )
+                # 프레임 영상에 저장
+                for i in range(120):
+                    self.output_video.write(preview_image)
+            # 영상 객체 닫기
+            if save:
+                self.output_video.release()
         
         # 이미지 미리보기 닫기
         if preview:
